@@ -67,6 +67,8 @@ tmp/
 *.db
 
 # --- Build artifacts ---
+backend/build/
+obj/
 *.zip
 *.tar
 *.gz
