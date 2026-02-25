@@ -1,0 +1,249 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}|Solution Items{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}|C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\run.ps1||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}|Solution Items{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}|solutionrelative:run.ps1||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}|Solution Items{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}|C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\run.bat||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}|Solution Items{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}|solutionrelative:run.bat||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}|Solution Items{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}|C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\install.ps1||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}|Solution Items{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}|solutionrelative:install.ps1||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{94F0E9E4-5074-46C6-A6D4-C331FF680254}|CoPilotSymptomatologistWinApp.csproj|c:\\users\\asus\\source\\repos\\copilotsymptomatologistwinapp_v1\\readme.txt||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{94F0E9E4-5074-46C6-A6D4-C331FF680254}|CoPilotSymptomatologistWinApp.csproj|solutionrelative:readme.txt||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{94F0E9E4-5074-46C6-A6D4-C331FF680254}|CoPilotSymptomatologistWinApp.csproj|c:\\users\\asus\\source\\repos\\copilotsymptomatologistwinapp_v1\\backend\\main.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{94F0E9E4-5074-46C6-A6D4-C331FF680254}|CoPilotSymptomatologistWinApp.csproj|solutionrelative:backend\\main.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{94F0E9E4-5074-46C6-A6D4-C331FF680254}|CoPilotSymptomatologistWinApp.csproj|c:\\users\\asus\\source\\repos\\copilotsymptomatologistwinapp_v1\\medicalassitantform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{94F0E9E4-5074-46C6-A6D4-C331FF680254}|CoPilotSymptomatologistWinApp.csproj|solutionrelative:medicalassitantform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{94F0E9E4-5074-46C6-A6D4-C331FF680254}|CoPilotSymptomatologistWinApp.csproj|C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\medicalassitantform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form",
+      "RelativeMoniker": "D:0:0:{94F0E9E4-5074-46C6-A6D4-C331FF680254}|CoPilotSymptomatologistWinApp.csproj|solutionrelative:medicalassitantform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{94F0E9E4-5074-46C6-A6D4-C331FF680254}|CoPilotSymptomatologistWinApp.csproj|c:\\users\\asus\\source\\repos\\copilotsymptomatologistwinapp_v1\\medicaldoctorform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{94F0E9E4-5074-46C6-A6D4-C331FF680254}|CoPilotSymptomatologistWinApp.csproj|solutionrelative:medicaldoctorform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{94F0E9E4-5074-46C6-A6D4-C331FF680254}|CoPilotSymptomatologistWinApp.csproj|C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\medicaldoctorform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form",
+      "RelativeMoniker": "D:0:0:{94F0E9E4-5074-46C6-A6D4-C331FF680254}|CoPilotSymptomatologistWinApp.csproj|solutionrelative:medicaldoctorform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{94F0E9E4-5074-46C6-A6D4-C331FF680254}|CoPilotSymptomatologistWinApp.csproj|c:\\users\\asus\\source\\repos\\copilotsymptomatologistwinapp_v1\\medicaldoctorform.designer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{94F0E9E4-5074-46C6-A6D4-C331FF680254}|CoPilotSymptomatologistWinApp.csproj|solutionrelative:medicaldoctorform.designer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{94F0E9E4-5074-46C6-A6D4-C331FF680254}|CoPilotSymptomatologistWinApp.csproj|C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\mainform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form",
+      "RelativeMoniker": "D:0:0:{94F0E9E4-5074-46C6-A6D4-C331FF680254}|CoPilotSymptomatologistWinApp.csproj|solutionrelative:mainform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 1,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedHeight": 579,
+          "SelectedChildIndex": 5,
+          "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{eefa5220-e298-11d0-8f78-00a0c9110057}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{004be353-6879-467c-9d1e-9ac23cdf6d49}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:1:0:{08a1bf1d-7967-4afc-8253-1790862ab8c9}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{d78612c7-9962-4b83-95d9-268046dad23a}"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "run.bat",
+              "DocumentMoniker": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\run.bat",
+              "RelativeDocumentMoniker": "run.bat",
+              "ToolTip": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\run.bat",
+              "RelativeToolTip": "run.bat",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAMAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000614|",
+              "WhenOpened": "2026-01-07T04:34:26.043Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "run.ps1",
+              "DocumentMoniker": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\run.ps1",
+              "RelativeDocumentMoniker": "run.ps1",
+              "ToolTip": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\run.ps1",
+              "RelativeToolTip": "run.ps1",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAABgAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-01-07T04:33:14.47Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "install.ps1",
+              "DocumentMoniker": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\install.ps1",
+              "RelativeDocumentMoniker": "install.ps1",
+              "ToolTip": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\install.ps1",
+              "RelativeToolTip": "install.ps1",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAADgAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-01-07T04:32:32.302Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "README.txt",
+              "DocumentMoniker": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\README.txt",
+              "RelativeDocumentMoniker": "README.txt",
+              "ToolTip": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\README.txt",
+              "RelativeToolTip": "README.txt",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAkAAAAOAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003109|",
+              "WhenOpened": "2026-01-07T04:08:34.286Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "main.py",
+              "DocumentMoniker": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\backend\\main.py",
+              "RelativeDocumentMoniker": "backend\\main.py",
+              "ToolTip": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\backend\\main.py",
+              "RelativeToolTip": "backend\\main.py",
+              "ViewState": "AgIAACUAAAAAAAAAAAAQwDUAAAAYAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-01-07T04:06:34.452Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 5,
+              "Title": "MedicalAssitantForm.cs",
+              "DocumentMoniker": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\MedicalAssitantForm.cs",
+              "RelativeDocumentMoniker": "MedicalAssitantForm.cs",
+              "ToolTip": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\MedicalAssitantForm.cs",
+              "RelativeToolTip": "MedicalAssitantForm.cs",
+              "ViewState": "AgIAAJQBAAAAAAAAAAA1wLQBAAAOAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-05T04:43:33.364Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 6,
+              "Title": "MedicalAssitantForm.cs [Design]",
+              "DocumentMoniker": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\MedicalAssitantForm.cs",
+              "RelativeDocumentMoniker": "MedicalAssitantForm.cs",
+              "ToolTip": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\MedicalAssitantForm.cs [Design]",
+              "RelativeToolTip": "MedicalAssitantForm.cs [Design]",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-07-13T16:22:52.265Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 8,
+              "Title": "MedicalDoctorForm.cs [Design]",
+              "DocumentMoniker": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\MedicalDoctorForm.cs",
+              "RelativeDocumentMoniker": "MedicalDoctorForm.cs",
+              "ToolTip": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\MedicalDoctorForm.cs [Design]",
+              "RelativeToolTip": "MedicalDoctorForm.cs [Design]",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-08-19T17:39:32.76Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 7,
+              "Title": "MedicalDoctorForm.cs",
+              "DocumentMoniker": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\MedicalDoctorForm.cs",
+              "RelativeDocumentMoniker": "MedicalDoctorForm.cs",
+              "ToolTip": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\MedicalDoctorForm.cs",
+              "RelativeToolTip": "MedicalDoctorForm.cs",
+              "ViewState": "AgIAAIsHAAAAAAAAAAAiwK0HAAAjAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-08-19T16:30:40.164Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 9,
+              "Title": "MedicalDoctorForm.Designer.cs",
+              "DocumentMoniker": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\MedicalDoctorForm.Designer.cs",
+              "RelativeDocumentMoniker": "MedicalDoctorForm.Designer.cs",
+              "ToolTip": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\MedicalDoctorForm.Designer.cs",
+              "RelativeToolTip": "MedicalDoctorForm.Designer.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAABYAAAAIAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-08-19T16:24:58.011Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 10,
+              "Title": "MainForm.cs [Design]",
+              "DocumentMoniker": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\MainForm.cs",
+              "RelativeDocumentMoniker": "MainForm.cs",
+              "ToolTip": "C:\\Users\\ASUS\\source\\repos\\CoPilotSymptomatologistWinApp_v1\\MainForm.cs [Design]",
+              "RelativeToolTip": "MainForm.cs [Design]",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-08-19T16:24:22.426Z"
+            }
+          ]
+        },
+        {
+          "DockedHeight": 488,
+          "SelectedChildIndex": -1,
+          "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:7:0:{d212f56b-c48a-434c-a121-1c5d80b59b9f}"
+            }
+          ]
+        },
+        {
+          "DockedHeight": 110,
+          "SelectedChildIndex": -1,
+          "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:1:0:{d212f56b-c48a-434c-a121-1c5d80b59b9f}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{0ad07096-bba9-4900-a651-0598d26f6d24}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{40ea2e6b-2121-4bb8-a43e-c83c04b51041}"
+            }
+          ]
+        },
+        {
+          "DockedHeight": 186,
+          "SelectedChildIndex": -1,
+          "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{34e76e81-ee4a-11d0-ae2e-00a0c90fffc3}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

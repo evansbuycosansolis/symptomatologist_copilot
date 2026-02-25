@@ -1,0 +1,1 @@
+Patient note attachment text\nSymptoms include fever and cough.
