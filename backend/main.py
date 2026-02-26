@@ -8,6 +8,8 @@ import sys
 import textwrap
 import uuid
 import base64
+import hashlib
+import hmac
 import smtplib
 import threading
 import time
@@ -18,8 +20,9 @@ from typing import Any, Literal
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -115,6 +118,20 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:3000").strip() or "http://localhost:3000"
 HOST = os.getenv("HOST", "127.0.0.1").strip() or "127.0.0.1"
 PORT = int(os.getenv("PORT", "8080"))
+DOCTOR_PIN = (os.getenv("DOCTOR_PIN", "docbayson888#").strip() or "docbayson888#")
+ASSISTANT_PIN = (os.getenv("ASSISTANT_PIN", "assistant123").strip() or "assistant123")
+AUTH_SECRET = (
+    os.getenv("AUTH_SECRET", "").strip()
+    or OPENAI_API_KEY
+    or "copilot-change-this-auth-secret"
+)
+AUTH_COOKIE_NAME = (os.getenv("AUTH_COOKIE_NAME", "copilot_session").strip() or "copilot_session")
+try:
+    AUTH_TTL_SECONDS = max(300, int(os.getenv("AUTH_TTL_SECONDS", "43200").strip() or "43200"))
+except Exception:
+    AUTH_TTL_SECONDS = 43200
+AUTH_COOKIE_SECURE = (os.getenv("AUTH_COOKIE_SECURE", "0").strip() or "0") in ("1", "true", "True")
+AUTH_COOKIE_PERSIST = (os.getenv("AUTH_COOKIE_PERSIST", "0").strip() or "0") in ("1", "true", "True")
 
 OPENAI_CLIENT = None
 OPENAI_INIT_ERROR = ""
@@ -259,6 +276,36 @@ def _extract_bracketed_prefix_value(text: str, prefix: str) -> str:
         if line.lower().startswith(prefix.lower()):
             return line[len(prefix) :].strip()
     return ""
+
+
+def _json_object_from_text(text: str) -> dict[str, Any]:
+    raw = (text or "").strip()
+    if not raw:
+        return {}
+    try:
+        obj = json.loads(raw)
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        pass
+
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start >= 0 and end > start:
+        snippet = raw[start : end + 1]
+        try:
+            obj = json.loads(snippet)
+            return obj if isinstance(obj, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _safe_int(value: Any, default: int, *, min_value: int = 0, max_value: int = 365) -> int:
+    try:
+        n = int(value)
+    except Exception:
+        return default
+    return max(min_value, min(max_value, n))
 
 
 def _wrap_pdf_lines(text: str, width_chars: int = 105) -> list[str]:
@@ -1051,6 +1098,86 @@ def _analyze_case(note: str, refs: list[str]) -> str:
     ).strip()
 
 
+def _draft_medical_certificate_from_doctor_context(
+    req: "MedicalCertificateAiFromDoctorRequest",
+    *,
+    patient_name: str,
+    patient_dob: str,
+) -> dict[str, Any]:
+    issue_date = (req.issue_date or "").strip() or datetime.now().strftime("%Y-%m-%d")
+    note = (req.doctor_note or "").strip()
+    analysis = (req.analysis or "").strip()
+    reason = (req.appointment_reason or "").strip()
+    notes = (req.appointment_notes or "").strip()
+
+    context = textwrap.dedent(
+        f"""
+        Patient Name: {patient_name}
+        Patient DOB: {patient_dob}
+        Issue Date: {issue_date}
+        Appointment Reason: {reason}
+        Appointment Notes: {notes}
+
+        Doctor Note:
+        {note}
+
+        AI Analysis:
+        {analysis}
+        """
+    ).strip()
+
+    ai_raw = openai_chat(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "You draft medical-certificate content for a doctor. "
+                    "Return strict JSON only with keys: diagnosis, recommendations, rest_days, valid_until, additional_notes. "
+                    "rest_days must be integer 0-365. valid_until must be YYYY-MM-DD or empty string."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Create certificate draft from this context:\n\n{context}",
+            },
+        ]
+    )
+    parsed = _json_object_from_text(ai_raw or "")
+
+    diagnosis = str(parsed.get("diagnosis") or "").strip()
+    if not diagnosis:
+        diagnosis = reason or "Clinical symptoms requiring short medical rest and follow-up."
+
+    recommendations = str(parsed.get("recommendations") or "").strip()
+    if not recommendations:
+        recommendations = "Advise rest, hydration, medications as prescribed, and follow-up as needed."
+
+    rest_days = _safe_int(parsed.get("rest_days"), 1, min_value=0, max_value=365)
+
+    valid_until = str(parsed.get("valid_until") or "").strip()
+    if not valid_until and rest_days > 0:
+        try:
+            issue_dt = datetime.strptime(issue_date, "%Y-%m-%d")
+            valid_until = (issue_dt + timedelta(days=rest_days)).strftime("%Y-%m-%d")
+        except Exception:
+            valid_until = ""
+
+    additional_notes = str(parsed.get("additional_notes") or "").strip()
+    if not additional_notes:
+        snippets = [x for x in [notes, analysis[:700], note[:700]] if (x or "").strip()]
+        additional_notes = "\n\n".join(snippets).strip()
+
+    return {
+        "diagnosis": diagnosis,
+        "recommendations": recommendations,
+        "rest_days": rest_days,
+        "valid_until": valid_until,
+        "additional_notes": additional_notes,
+        "issue_date": issue_date,
+        "ai_used": bool(ai_raw),
+    }
+
+
 def _create_intake_record(intake: "PatientIntakeData", enhanced_report: str) -> dict[str, Any]:
     record_id = uuid.uuid4().hex[:12]
     prefix = _patient_file_prefix(
@@ -1134,6 +1261,14 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     history: list[ChatMessage] = Field(default_factory=list)
+
+
+PortalRole = Literal["doctor", "assistant"]
+
+
+class AuthLoginRequest(BaseModel):
+    role: PortalRole
+    pin: str = ""
 
 
 class PatientIntakeData(BaseModel):
@@ -1236,6 +1371,10 @@ class PatientRecordPdfCreateRequest(BaseModel):
 class MedicalCertificatePdfCreateRequest(BaseModel):
     patient_name: str
     patient_dob: str = ""
+    patient_address: str = ""
+    patient_gender: str = ""
+    patient_age: str = ""
+    patient_age_gender: str = ""
     diagnosis: str = ""
     recommendations: str = ""
     rest_days: int | None = Field(default=None, ge=0, le=365)
@@ -1245,6 +1384,28 @@ class MedicalCertificatePdfCreateRequest(BaseModel):
     doctor_license: str = ""
     clinic_name: str = ""
     additional_notes: str = ""
+    requested_for: str = ""
+    use_doctor_template: bool = False
+    certificate_title: str = "Medical Certificate"
+
+
+class MedicalCertificateAiFromDoctorRequest(BaseModel):
+    patient_name: str = ""
+    patient_dob: str = ""
+    patient_address: str = ""
+    patient_gender: str = ""
+    patient_age: str = ""
+    patient_age_gender: str = ""
+    doctor_note: str = ""
+    analysis: str = ""
+    appointment_reason: str = ""
+    appointment_notes: str = ""
+    doctor_name: str = ""
+    doctor_license: str = ""
+    clinic_name: str = ""
+    issue_date: str = ""
+    requested_for: str = ""
+    use_doctor_template: bool = False
     certificate_title: str = "Medical Certificate"
 
 
@@ -1483,11 +1644,125 @@ def _send_email(to_email: str, subject: str, body: str) -> None:
         smtp.send_message(msg)
 
 
+def _cors_origins() -> list[str]:
+    defaults = {
+        FRONTEND_ORIGIN,
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+    }
+    extra_raw = os.getenv("CORS_ORIGINS", "").strip()
+    if extra_raw:
+        defaults.update({x.strip() for x in extra_raw.split(",") if x.strip()})
+    return sorted(defaults)
+
+
+def _auth_sign(raw: str) -> str:
+    return hmac.new(AUTH_SECRET.encode("utf-8"), raw.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _auth_cookie_token(role: PortalRole) -> str:
+    exp = int(time.time()) + AUTH_TTL_SECONDS
+    payload = f"{role}|{exp}"
+    return f"{payload}|{_auth_sign(payload)}"
+
+
+def _auth_role_from_token(token: str) -> PortalRole | None:
+    parts = (token or "").split("|")
+    if len(parts) != 3:
+        return None
+    role_raw, exp_raw, sig = parts
+    role = role_raw.strip().lower()
+    if role not in ("doctor", "assistant"):
+        return None
+    payload = f"{role}|{exp_raw}"
+    expected = _auth_sign(payload)
+    if not hmac.compare_digest(expected, sig):
+        return None
+    try:
+        exp = int(exp_raw)
+    except Exception:
+        return None
+    if exp <= int(time.time()):
+        return None
+    return "doctor" if role == "doctor" else "assistant"
+
+
+def _session_role(request: Request) -> PortalRole | None:
+    token = (request.cookies.get(AUTH_COOKIE_NAME) or "").strip()
+    if not token:
+        return None
+    return _auth_role_from_token(token)
+
+
+def _set_auth_cookie(response: Response, role: PortalRole) -> None:
+    kwargs: dict[str, Any] = {}
+    if AUTH_COOKIE_PERSIST:
+        kwargs["max_age"] = AUTH_TTL_SECONDS
+
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=_auth_cookie_token(role),
+        httponly=True,
+        secure=AUTH_COOKIE_SECURE,
+        samesite="lax",
+        path="/",
+        **kwargs,
+    )
+
+
+def _clear_auth_cookie(response: Response) -> None:
+    response.delete_cookie(key=AUTH_COOKIE_NAME, path="/")
+
+
+def _path_matches(path: str, patterns: tuple[str, ...]) -> bool:
+    for p in patterns:
+        if path == p or path.startswith(f"{p}/"):
+            return True
+    return False
+
+
+_PROTECTED_PATHS: tuple[str, ...] = (
+    "/chat",
+    "/enhance-patient-report",
+    "/intakes",
+    "/analyze_case",
+    "/list_references",
+    "/ask_pdf",
+    "/upload_pdf",
+    "/attachments/extract",
+    "/train_ai",
+    "/patient_records",
+    "/documents",
+    "/availability",
+    "/appointments",
+    "/waitlist",
+    "/rxnav_lookup",
+    "/medical_references",
+    "/storage",
+)
+
+_DOCTOR_ONLY_PATHS: tuple[str, ...] = (
+    "/analyze_case",
+    "/list_references",
+    "/ask_pdf",
+    "/upload_pdf",
+    "/train_ai",
+    "/patient_records",
+    "/documents/pdfs",
+    "/documents/patient_record_pdf",
+    "/documents/medical_certificate_pdf_ai",
+    "/rxnav_lookup",
+    "/medical_references",
+)
+
+
 app = FastAPI(title="CoPilot Symptomatologist Backend", version="2.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*", FRONTEND_ORIGIN],
-    allow_credentials=False,
+    allow_origins=_cors_origins(),
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1657,6 +1932,74 @@ def _medical_references_summary(query: str, report_text: str, max_paragraphs: in
         f"References were gathered for '{query}' across PubMed, ClinicalTrials.gov, and RxNav. "
         "Review the report text for article titles, trial IDs, and medication name matches."
     )
+
+
+@app.middleware("http")
+async def _auth_guard(request: Request, call_next):
+    path = request.url.path or "/"
+    q_fresh = (request.query_params.get("fresh") or "").strip().lower()
+    fresh_login_requested = q_fresh in ("1", "true", "yes")
+    if request.method.upper() == "OPTIONS":
+        return await call_next(request)
+
+    # Logged-in users should not return to PIN login page until they logout.
+    if path == "/login" or path.startswith("/login/"):
+        if fresh_login_requested:
+            resp = await call_next(request)
+            _clear_auth_cookie(resp)
+            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            resp.headers["Pragma"] = "no-cache"
+            return resp
+        role = _session_role(request)
+        if role == "doctor":
+            return RedirectResponse(url="/doctor/", status_code=303)
+        if role == "assistant":
+            return RedirectResponse(url="/assistant/", status_code=303)
+        return await call_next(request)
+
+    # Block direct access to doctor workspace unless the authenticated session is doctor.
+    if path == "/doctor" or path.startswith("/doctor/"):
+        role = _session_role(request)
+        if role == "doctor":
+            return await call_next(request)
+        if role == "assistant":
+            return RedirectResponse(url="/assistant/?notice=doctor_locked", status_code=303)
+        return RedirectResponse(url="/login/?next=doctor", status_code=303)
+
+    # Guard protected API/storage routes.
+    if _path_matches(path, _PROTECTED_PATHS):
+        role = _session_role(request)
+        if role is None:
+            return JSONResponse(status_code=401, content={"detail": "Authentication required."})
+        if _path_matches(path, _DOCTOR_ONLY_PATHS) and role != "doctor":
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Doctor access required for this resource."},
+            )
+
+    return await call_next(request)
+
+
+@app.post("/auth/login")
+def auth_login(req: AuthLoginRequest, response: Response) -> dict[str, Any]:
+    pin = (req.pin or "").strip()
+    expected = DOCTOR_PIN if req.role == "doctor" else ASSISTANT_PIN
+    if not hmac.compare_digest(pin, expected):
+        raise HTTPException(status_code=401, detail="Invalid login credentials.")
+    _set_auth_cookie(response, req.role)
+    return {"ok": True, "authenticated": True, "role": req.role}
+
+
+@app.get("/auth/session")
+def auth_session(request: Request) -> dict[str, Any]:
+    role = _session_role(request)
+    return {"authenticated": role is not None, "role": role}
+
+
+@app.post("/auth/logout")
+def auth_logout(response: Response) -> dict[str, bool]:
+    _clear_auth_cookie(response)
+    return {"ok": True}
 
 
 @app.get("/api")
@@ -1961,6 +2304,77 @@ def create_patient_record_pdf(req: PatientRecordPdfCreateRequest) -> dict[str, A
     return {"ok": True, "document": document}
 
 
+def _medical_certificate_template_text(
+    req: MedicalCertificatePdfCreateRequest,
+    *,
+    patient_name: str,
+    issue_date: str,
+) -> str:
+    age_gender = (req.patient_age_gender or "").strip()
+    if not age_gender:
+        age = (req.patient_age or "").strip()
+        gender = (req.patient_gender or "").strip()
+        if age and gender:
+            age_gender = f"{age} / {gender}"
+        else:
+            age_gender = age or gender
+    if not age_gender:
+        age_gender = "male/female"
+
+    address = (req.patient_address or "").strip() or "________________"
+    reason = (req.diagnosis or "").strip() or "________________"
+    diagnosis = (req.diagnosis or "").strip() or "________________"
+    requested_for = (req.requested_for or "").strip() or "clinic documentation"
+
+    remarks_parts = []
+    if (req.recommendations or "").strip():
+        remarks_parts.append((req.recommendations or "").strip())
+    if req.rest_days is not None:
+        remarks_parts.append(f"Rest advised: {int(req.rest_days)} day(s).")
+    if (req.additional_notes or "").strip():
+        remarks_parts.append((req.additional_notes or "").strip())
+    remarks = " ".join(remarks_parts).strip() or "________________"
+
+    return "\n".join(
+        [
+            "RICHELLE JOY DIAMANTE-BAYSON, MD, FPCP, FPRA",
+            "Internal Medicine (Adult Diseases Specialist)",
+            "Rheumatology, Clinical Immunology & Osteoporosis",
+            "",
+            "Name: "
+            + patient_name
+            + "      "
+            + "Age/Gender: "
+            + (age_gender or "________________"),
+            "Address: " + address + "      " + "Date: " + issue_date,
+            "",
+            "MEDICAL CERTIFICATE",
+            "",
+            "To whom it may concern,",
+            "",
+            "This is to certify that "
+            + patient_name
+            + ", "
+            + (req.patient_gender or "male/female")
+            + ",",
+            "consulted me today, " + issue_date + ",",
+            "at my clinic because of " + reason + ".",
+            "",
+            "Clinical Impression: " + diagnosis,
+            "",
+            "Remarks: " + remarks,
+            "",
+            "This certificate is issued upon the request of the patient for",
+            requested_for + " only and not intended for medicolegal use.",
+            "Thanks.",
+            "",
+            "Richelle Joy D. Bayson, MD",
+            "Lic. No.: 0114277",
+            "PTR No.: 9234542",
+        ]
+    )
+
+
 @app.post("/documents/medical_certificate_pdf")
 def create_medical_certificate_pdf(req: MedicalCertificatePdfCreateRequest) -> dict[str, Any]:
     patient_name = (req.patient_name or "").strip()
@@ -1998,22 +2412,32 @@ def create_medical_certificate_pdf(req: MedicalCertificatePdfCreateRequest) -> d
     if (req.clinic_name or "").strip():
         signer_lines.append(f"Clinic: {(req.clinic_name or '').strip()}")
 
-    sections: list[tuple[str, str]] = [
-        (
-            "Patient",
-            "\n".join(
-                [
-                    f"Name: {patient_name}",
-                    *([f"DOB: {(req.patient_dob or '').strip()}"] if (req.patient_dob or "").strip() else []),
-                ]
+    if req.use_doctor_template:
+        template_text = _medical_certificate_template_text(
+            req,
+            patient_name=patient_name,
+            issue_date=issue_date,
+        )
+        sections: list[tuple[str, str]] = [("Medical Certificate", template_text)]
+        if not (req.certificate_title or "").strip():
+            certificate_title = "Medical Certificate (Doctor Template)"
+    else:
+        sections = [
+            (
+                "Patient",
+                "\n".join(
+                    [
+                        f"Name: {patient_name}",
+                        *([f"DOB: {(req.patient_dob or '').strip()}"] if (req.patient_dob or "").strip() else []),
+                    ]
+                ),
             ),
-        ),
-        ("Certificate", "\n".join(intro_lines)),
-    ]
-    if details_lines:
-        sections.append(("Clinical Details", "\n".join(details_lines)))
-    if signer_lines:
-        sections.append(("Issuer", "\n".join(signer_lines)))
+            ("Certificate", "\n".join(intro_lines)),
+        ]
+        if details_lines:
+            sections.append(("Clinical Details", "\n".join(details_lines)))
+        if signer_lines:
+            sections.append(("Issuer", "\n".join(signer_lines)))
 
     try:
         pdf_bytes = _render_pdf_document(certificate_title, sections)
@@ -2030,6 +2454,59 @@ def create_medical_certificate_pdf(req: MedicalCertificatePdfCreateRequest) -> d
         naming_suffix="MC",
     )
     return {"ok": True, "document": document}
+
+
+@app.post("/documents/medical_certificate_pdf_ai")
+def create_medical_certificate_pdf_ai(req: MedicalCertificateAiFromDoctorRequest) -> dict[str, Any]:
+    note = (req.doctor_note or "").strip()
+    patient_name = (
+        (req.patient_name or "").strip()
+        or _extract_labeled_value(note, ["Full Name:", "Patient Name:"])
+        or _extract_bracketed_prefix_value(note, "[Assistant intake selected]")
+    )
+    patient_dob = (
+        (req.patient_dob or "").strip()
+        or _extract_labeled_value(note, ["Date of Birth:", "DOB:"])
+    )
+    if not patient_name:
+        raise HTTPException(status_code=400, detail="patient_name is required (or include in doctor_note)")
+
+    draft = _draft_medical_certificate_from_doctor_context(
+        req,
+        patient_name=patient_name,
+        patient_dob=patient_dob,
+    )
+    cert_req = MedicalCertificatePdfCreateRequest(
+        patient_name=patient_name,
+        patient_dob=patient_dob,
+        patient_address=(req.patient_address or "").strip(),
+        patient_gender=(req.patient_gender or "").strip(),
+        patient_age=(req.patient_age or "").strip(),
+        patient_age_gender=(req.patient_age_gender or "").strip(),
+        diagnosis=str(draft.get("diagnosis") or ""),
+        recommendations=str(draft.get("recommendations") or ""),
+        rest_days=_safe_int(draft.get("rest_days"), 1, min_value=0, max_value=365),
+        issue_date=str(draft.get("issue_date") or ""),
+        valid_until=str(draft.get("valid_until") or ""),
+        doctor_name=(req.doctor_name or "").strip(),
+        doctor_license=(req.doctor_license or "").strip(),
+        clinic_name=(req.clinic_name or "").strip(),
+        additional_notes=str(draft.get("additional_notes") or ""),
+        requested_for=(req.requested_for or "").strip(),
+        use_doctor_template=bool(req.use_doctor_template),
+        certificate_title=(req.certificate_title or "").strip() or "Medical Certificate",
+    )
+    result = create_medical_certificate_pdf(cert_req)
+    return {
+        **result,
+        "ai_used": bool(draft.get("ai_used")),
+        "ai_draft": {
+            "diagnosis": cert_req.diagnosis,
+            "recommendations": cert_req.recommendations,
+            "rest_days": cert_req.rest_days,
+            "valid_until": cert_req.valid_until,
+        },
+    }
 
 
 @app.get("/availability")

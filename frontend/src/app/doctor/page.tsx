@@ -14,17 +14,34 @@ import type {
   WaitlistItem,
 } from "@/lib/types";
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { ensureFreshLoginState, fetchPortalSession, logoutPortal } from "@/lib/portal-auth";
 
 const reviseSystemPrompt =
   "You are an expert medical scribe. Rewrite the doctor's note as a formal structured medical report. Keep every fact and measurement. Do not omit or invent information. If uncertain, preserve the original wording.";
 
+type IndexedDocument = {
+  id: string;
+  document_type: string;
+  title: string;
+  patient_name: string;
+  patient_dob?: string;
+  filename: string;
+  path: string;
+  stored_path: string;
+  created_at: string;
+  size_bytes?: number;
+};
+
 export default function DoctorPage() {
+  const router = useRouter();
   const [doctorNote, setDoctorNote] = useState("");
   const [analysis, setAnalysis] = useState("");
   const [status, setStatus] = useState("Ready.");
   const [error, setError] = useState("");
   const [busy, startBusy] = useTransition();
+  const [accessChecked, setAccessChecked] = useState(false);
 
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([
     {
@@ -67,6 +84,33 @@ export default function DoctorPage() {
   const [allowWaitlist, setAllowWaitlist] = useState(true);
   const [showAssistantIntakePicker, setShowAssistantIntakePicker] = useState(false);
   const [selectedAssistantIntakeId, setSelectedAssistantIntakeId] = useState("");
+  const [useDoctorTemplateForPdf, setUseDoctorTemplateForPdf] = useState(false);
+  const [useMedicalCertificateTemplateForPdf, setUseMedicalCertificateTemplateForPdf] = useState(false);
+  const [generatedDocuments, setGeneratedDocuments] = useState<IndexedDocument[]>([]);
+  const [documentViewer, setDocumentViewer] = useState<{ url: string; title: string } | null>(null);
+  const documentViewerRef = useRef<HTMLIFrameElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      await ensureFreshLoginState();
+      if (cancelled) return;
+      const role = await fetchPortalSession();
+      if (cancelled) return;
+      if (role === "assistant") {
+        router.replace("/assistant/?notice=doctor_locked");
+        return;
+      }
+      if (role !== "doctor") {
+        router.replace("/login/?next=doctor");
+        return;
+      }
+      setAccessChecked(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   const setUiError = (e: unknown, fallback: string) => {
     setError(e instanceof Error ? e.message : fallback);
@@ -83,6 +127,117 @@ export default function DoctorPage() {
   const extractDobFromText = (text: string) => {
     const m = (text || "").match(/(?:Date of Birth|DOB)\s*:\s*([^\n\r]+)/i);
     return (m?.[1] || "").trim();
+  };
+
+  const extractPatientNameFromText = (text: string) => {
+    const labeled = (text || "").match(/(?:Full Name|Patient Name)\s*:\s*([^\n\r]+)/i);
+    if ((labeled?.[1] || "").trim()) return labeled?.[1].trim() || "";
+    const assistantHeader = (text || "").match(/\[Assistant intake selected\]\s*([^\n\r]+)/i);
+    return (assistantHeader?.[1] || "").trim();
+  };
+
+  const extractLabeledValue = (text: string, labels: string[]) => {
+    const lines = (text || "").replace(/\r/g, "\n").split("\n");
+    for (const raw of lines) {
+      const line = (raw || "").trim();
+      if (!line) continue;
+      const lower = line.toLowerCase();
+      for (const label of labels) {
+        const lbl = (label || "").trim().toLowerCase();
+        if (!lbl) continue;
+        if (lower.startsWith(lbl)) {
+          return line.slice(lbl.length).trim();
+        }
+      }
+    }
+    return "";
+  };
+
+  const computeAgeFromDob = (dob: string) => {
+    const raw = (dob || "").trim();
+    if (!raw) return "";
+    const dt = new Date(raw);
+    if (Number.isNaN(dt.getTime())) return "";
+    const now = new Date();
+    let age = now.getFullYear() - dt.getFullYear();
+    const birthdayThisYear = new Date(
+      now.getFullYear(),
+      dt.getMonth(),
+      dt.getDate(),
+    );
+    if (now < birthdayThisYear) age -= 1;
+    return age >= 0 ? String(age) : "";
+  };
+
+  const buildDoctorTemplateNote = (noteText: string) => {
+    const patientName =
+      apptPatientName.trim() || extractPatientNameFromText(noteText) || "________________";
+    const patientDob = extractDobFromText(noteText);
+    const ageFromNote = extractLabeledValue(noteText, ["Age:", "Age/Gender:"]);
+    const genderFromNote = extractLabeledValue(noteText, ["Gender:", "Sex:"]);
+    const derivedAge = computeAgeFromDob(patientDob);
+    const address = extractLabeledValue(noteText, ["Address:"]);
+    const followUp =
+      apptNotes.trim() || extractLabeledValue(noteText, ["Follow up:", "Follow-up:"]);
+    const visitDate = (apptDate || "").trim() || new Date().toISOString().slice(0, 10);
+
+    let ageGender = "";
+    if (ageFromNote && genderFromNote) ageGender = `${ageFromNote} / ${genderFromNote}`;
+    else if (ageFromNote) ageGender = ageFromNote;
+    else if (derivedAge && genderFromNote) ageGender = `${derivedAge} / ${genderFromNote}`;
+    else ageGender = derivedAge || genderFromNote;
+
+    const templateNote = [
+      "DOCTOR TEMPLATE",
+      "Physician: RICHELLE JOY DIAMANTE-BAYSON, MD, FPCP, FPRA",
+      "Specialty: Internal Medicine (Adult Diseases Specialist), Rheumatology, Clinical Immunology & Osteoporosis",
+      "",
+      `Patient Name: ${patientName}`,
+      `Age/Gender: ${ageGender || "________________"}`,
+      `Address: ${address || "________________"}`,
+      `Date: ${visitDate}`,
+      "",
+      "RX / Clinical Orders:",
+      noteText.trim() || "(No clinical note provided.)",
+      "",
+      "Follow up on:",
+      followUp || "As advised by attending physician.",
+      "",
+      "Signature:",
+      "Richelle Joy D. Bayson, MD",
+      "Lic. No.: 0114277",
+      "PTR No.: 9234542",
+    ].join("\n");
+
+    return {
+      note: templateNote,
+      patientName: patientName.trim(),
+      patientDob: patientDob.trim(),
+    };
+  };
+
+  const buildMedicalCertificateTemplatePayload = (noteText: string) => {
+    const patientDob = extractDobFromText(noteText);
+    const patientGender = extractLabeledValue(noteText, ["Gender:", "Sex:"]).trim();
+    const patientAddress = extractLabeledValue(noteText, ["Address:"]).trim();
+    const ageRaw = extractLabeledValue(noteText, ["Age:", "Age/Gender:"]).trim();
+    const computedAge = computeAgeFromDob(patientDob);
+    const patientAge = ageRaw || computedAge;
+
+    let patientAgeGender = extractLabeledValue(noteText, ["Age/Gender:"]).trim();
+    if (!patientAgeGender) {
+      if (patientAge && patientGender) patientAgeGender = `${patientAge} / ${patientGender}`;
+      else patientAgeGender = patientAge || patientGender;
+    }
+
+    return {
+      patient_dob: patientDob,
+      patient_gender: patientGender,
+      patient_address: patientAddress,
+      patient_age: patientAge,
+      patient_age_gender: patientAgeGender,
+      requested_for: apptReason.trim() || "clinic documentation",
+    };
   };
 
   const refreshScheduling = async () => {
@@ -104,6 +259,18 @@ export default function DoctorPage() {
     } finally {
       setSchedBusy(false);
     }
+  };
+
+  const handleLogout = () => {
+    setError("");
+    setStatus("Signing out...");
+    startBusy(async () => {
+      try {
+        await logoutPortal();
+      } finally {
+        router.replace("/login/?fresh=1");
+      }
+    });
   };
 
   const saveAvailability = async () => {
@@ -226,9 +393,145 @@ export default function DoctorPage() {
     setDoctorNote((prev) => `${prev}${prev.trim() ? "\n\n" : ""}${text}`.trim());
   };
 
-  const openStoredPdf = (storedPath: string) => {
+  const normalizeStoredPath = (path: string) => {
+    const clean = (path || "").trim();
+    if (!clean) return "";
+    if (clean.startsWith("/")) return clean;
+    return `/storage/${clean.replace(/^\/+/, "")}`;
+  };
+
+  const openDocumentViewer = (storedPath: string, title: string) => {
+    const normalized = normalizeStoredPath(storedPath);
+    if (!normalized) return;
+    setDocumentViewer({
+      url: normalized,
+      title: title || "Patient document",
+    });
+  };
+
+  const openStoredPdf = (storedPath: string, title = "Patient document") => {
     if (typeof window === "undefined") return;
-    window.open(storedPath, "_blank", "noopener,noreferrer");
+    openDocumentViewer(storedPath, title);
+  };
+
+  const openDocumentInNewTab = () => {
+    if (typeof window === "undefined") return;
+    if (!documentViewer?.url) return;
+    window.open(documentViewer.url, "_blank", "noopener,noreferrer");
+  };
+
+  const printActiveDocument = () => {
+    if (typeof window === "undefined") return;
+    const iframe = documentViewerRef.current;
+    try {
+      iframe?.contentWindow?.focus();
+      iframe?.contentWindow?.print();
+      return;
+    } catch {
+      // Fallback for viewers that block iframe printing.
+    }
+    if (documentViewer?.url) {
+      window.open(documentViewer.url, "_blank", "noopener,noreferrer");
+      setStatus("Opened document in a new tab. Use browser print there.");
+    }
+  };
+
+  const escapeCsvCell = (value: string) => `"${(value || "").replace(/"/g, "\"\"")}"`;
+
+  const generateCensus = () => {
+    const rows: string[] = [];
+    rows.push(
+      [
+        "source",
+        "record_id",
+        "patient_name",
+        "date_of_birth",
+        "chief_complaint",
+        "created_at",
+        "filename",
+      ].join(","),
+    );
+
+    for (const intake of assistantIntakes) {
+      rows.push(
+        [
+          "assistant_intake",
+          escapeCsvCell(intake.id || ""),
+          escapeCsvCell(intake.full_name || ""),
+          escapeCsvCell(intake.date_of_birth || ""),
+          escapeCsvCell(intake.chief_complaint || ""),
+          escapeCsvCell(intake.created_at || ""),
+          escapeCsvCell(""),
+        ].join(","),
+      );
+    }
+
+    for (const record of records) {
+      const m = (record.filename || "").match(/^(.+?) \((.+?)\)/);
+      const parsedName = (m?.[1] || "").trim();
+      const parsedDob = (m?.[2] || "").trim();
+      rows.push(
+        [
+          "doctor_record",
+          escapeCsvCell(record.id || ""),
+          escapeCsvCell(parsedName || record.title || ""),
+          escapeCsvCell(parsedDob),
+          escapeCsvCell(""),
+          escapeCsvCell(record.created_at || ""),
+          escapeCsvCell(record.filename || ""),
+        ].join(","),
+      );
+    }
+
+    const ts = new Date().toISOString().replace(/[:]/g, "-");
+    const filename = `patient_census_${ts}.csv`;
+    const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    setStatus(
+      `Census generated: ${assistantIntakes.length} assistant intake(s), ${records.length} doctor record(s).`,
+    );
+  };
+
+  const refreshGeneratedDocuments = async () => {
+    try {
+      const resp = await getJson<{
+        items: Array<{
+          id: string;
+          document_type?: string;
+          title?: string;
+          patient_name?: string;
+          patient_dob?: string;
+          filename: string;
+          path: string;
+          created_at?: string;
+          size_bytes?: number;
+          stored_path?: string;
+        }>;
+      }>("/documents/pdfs");
+      const items: IndexedDocument[] = (resp.items ?? []).map((doc) => {
+        const relPath = (doc.path || "").replace(/^\/+/, "");
+        return {
+          id: doc.id || relPath,
+          document_type: doc.document_type || "document",
+          title: doc.title || doc.filename || "Document",
+          patient_name: doc.patient_name || "",
+          patient_dob: doc.patient_dob || "",
+          filename: doc.filename || relPath,
+          path: relPath,
+          stored_path: normalizeStoredPath(doc.stored_path || relPath),
+          created_at: doc.created_at || "",
+          size_bytes: doc.size_bytes,
+        };
+      });
+      setGeneratedDocuments(items);
+    } catch {
+      // Keep existing lists usable even if document index refresh fails.
+    }
   };
 
   const analyzeCaseNote = async (note: string) => {
@@ -265,18 +568,68 @@ export default function DoctorPage() {
     return { name, noteText: parts.join("\n\n") };
   };
 
+  const buildAssistantIntakePdf = async (resp: {
+    meta?: IntakeListItem;
+    intake?: PatientIntakeData;
+    intake_summary?: string;
+    enhanced_report?: string;
+  }) => {
+    if (!resp.intake) return null;
+    const { name } = buildAssistantIntakeNote(resp);
+    const pdfResp = await postJson<{ ok: boolean; document: GeneratedPdfDocument }>(
+      "/documents/intake_pdf",
+      {
+        intake: resp.intake,
+        enhanced_report: resp.enhanced_report ?? "",
+        title: `Assistant Intake Record - ${name}`,
+      },
+    );
+    if (!pdfResp.document?.stored_path) return null;
+    return pdfResp.document;
+  };
+
   const refreshPatientRecords = async () => {
     setError("");
     setStatus("Loading doctor records and assistant intakes...");
     try {
-      const [recordsResp, intakesResp] = await Promise.all([
+      const [recordsResp, intakesResp, docsResp] = await Promise.all([
         getJson<{ items: PatientRecordListItem[] }>("/patient_records"),
         getJson<{ items: IntakeListItem[] }>("/intakes"),
+        getJson<{
+          items: Array<{
+            id: string;
+            document_type?: string;
+            title?: string;
+            patient_name?: string;
+            patient_dob?: string;
+            filename: string;
+            path: string;
+            created_at?: string;
+            size_bytes?: number;
+            stored_path?: string;
+          }>;
+        }>("/documents/pdfs"),
       ]);
       const doctorRecords = recordsResp.items ?? [];
       const intakeItems = intakesResp.items ?? [];
+      const docItems: IndexedDocument[] = (docsResp.items ?? []).map((doc) => {
+        const relPath = (doc.path || "").replace(/^\/+/, "");
+        return {
+          id: doc.id || relPath,
+          document_type: doc.document_type || "document",
+          title: doc.title || doc.filename || "Document",
+          patient_name: doc.patient_name || "",
+          patient_dob: doc.patient_dob || "",
+          filename: doc.filename || relPath,
+          path: relPath,
+          stored_path: normalizeStoredPath(doc.stored_path || relPath),
+          created_at: doc.created_at || "",
+          size_bytes: doc.size_bytes,
+        };
+      });
       setRecords(doctorRecords);
       setAssistantIntakes(intakeItems);
+      setGeneratedDocuments(docItems);
       if (!selectedAssistantIntakeId && intakeItems[0]?.id) {
         setSelectedAssistantIntakeId(intakeItems[0].id);
       } else if (
@@ -285,9 +638,11 @@ export default function DoctorPage() {
       ) {
         setSelectedAssistantIntakeId(intakeItems[0]?.id ?? "");
       }
-      setStatus(
-        `Loaded ${doctorRecords.length} doctor record(s) and ${intakeItems.length} assistant intake(s).`,
-      );
+      setStatus([
+        `Loaded ${doctorRecords.length} doctor record(s)`,
+        `${intakeItems.length} assistant intake(s)`,
+        `${docItems.length} generated document(s).`,
+      ].join(", "));
     } catch (e) {
       setUiError(e, "Failed to load patient records.");
     }
@@ -330,17 +685,11 @@ export default function DoctorPage() {
         let pdfOpened = false;
         if (resp.intake) {
           try {
-            const pdfResp = await postJson<{ ok: boolean; document: GeneratedPdfDocument }>(
-              "/documents/intake_pdf",
-              {
-                intake: resp.intake,
-                enhanced_report: resp.enhanced_report ?? "",
-                title: `Assistant Intake Record - ${name}`,
-              },
-            );
-            if (pdfResp.document?.stored_path) {
-              openStoredPdf(pdfResp.document.stored_path);
+            const doc = await buildAssistantIntakePdf(resp);
+            if (doc?.stored_path) {
+              openStoredPdf(doc.stored_path, doc.filename || `Assistant Intake Record - ${name}`);
               pdfOpened = true;
+              await refreshGeneratedDocuments();
             }
           } catch {
             pdfOpened = false;
@@ -356,6 +705,31 @@ export default function DoctorPage() {
         );
       } catch (e) {
         setUiError(e, "Failed to open assistant intake for analysis.");
+      }
+    });
+  };
+
+  const openAssistantIntakePdf = (recordId: string) => {
+    setError("");
+    setStatus(`Preparing intake PDF for ${recordId}...`);
+    startBusy(async () => {
+      try {
+        const resp = await getJson<{
+          meta?: IntakeListItem;
+          intake?: PatientIntakeData;
+          intake_summary?: string;
+          enhanced_report?: string;
+        }>(`/intakes/${recordId}`);
+        const doc = await buildAssistantIntakePdf(resp);
+        if (!doc?.stored_path) {
+          setError("Could not generate intake PDF for this record.");
+          return;
+        }
+        openStoredPdf(doc.stored_path, doc.filename || "Assistant Intake Record");
+        setStatus(`Opened intake PDF: ${doc.filename}`);
+        await refreshGeneratedDocuments();
+      } catch (e) {
+        setUiError(e, "Failed to open intake PDF.");
       }
     });
   };
@@ -408,6 +782,39 @@ export default function DoctorPage() {
       setStatus(`Attachment processed: ${file.name}`);
     } catch (e) {
       setUiError(e, "Attachment processing failed.");
+    }
+  };
+
+  const handleAttachHandwrittenRx = async (file: File) => {
+    setError("");
+    setStatus(`Parsing handwritten RX: ${file.name}`);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const patientName = apptPatientName.trim() || extractPatientNameFromText(doctorNote);
+      const patientDob = extractDobFromText(doctorNote);
+      if (patientName) form.append("patient_name", patientName);
+      if (patientDob) form.append("patient_dob", patientDob);
+
+      const resp = await postMultipart<{
+        extracted_text: string;
+        message?: string;
+        stored_path?: string;
+        ocr_engine?: string;
+      }>("/attachments/extract", form);
+
+      const parsedText = resp.extracted_text?.trim()
+        ? resp.extracted_text.trim()
+        : resp.message || "No readable text detected from handwritten RX.";
+      appendToNote(`[Handwritten RX: ${file.name}]\n${parsedText}`);
+
+      if (resp.extracted_text?.trim()) {
+        setStatus(`Handwritten RX parsed and added to Doctor Note: ${file.name}`);
+      } else {
+        setStatus(`Handwritten RX uploaded, but OCR found limited/no text: ${file.name}`);
+      }
+    } catch (e) {
+      setUiError(e, "Handwritten RX processing failed.");
     }
   };
 
@@ -471,19 +878,33 @@ export default function DoctorPage() {
     setStatus("Generating patient record PDF...");
     startBusy(async () => {
       try {
-        const patientDob = extractDobFromText(clean);
+        const fallbackPatientName = (
+          apptPatientName.trim() || extractPatientNameFromText(clean)
+        ).trim();
+        const fallbackPatientDob = extractDobFromText(clean);
+        const templatePayload = useDoctorTemplateForPdf
+          ? buildDoctorTemplateNote(clean)
+          : null;
+        const noteForPdf = templatePayload?.note || clean;
+        const patientNameForPdf = templatePayload?.patientName || fallbackPatientName;
+        const patientDobForPdf = templatePayload?.patientDob || fallbackPatientDob;
         const resp = await postJson<{ ok: boolean; document: GeneratedPdfDocument }>(
           "/documents/patient_record_pdf",
           {
-            note: clean,
-            title: "Doctor Patient Record",
-            patient_name: apptPatientName.trim(),
-            patient_dob: patientDob,
+            note: noteForPdf,
+            title: useDoctorTemplateForPdf
+              ? "Doctor Patient Record (Template)"
+              : "Doctor Patient Record",
+            patient_name: patientNameForPdf,
+            patient_dob: patientDobForPdf,
             source_role: "doctor",
           },
         );
-        setStatus(`Patient record PDF ready: ${resp.document.filename}`);
-        openStoredPdf(resp.document.stored_path);
+        setStatus(
+          `${useDoctorTemplateForPdf ? "Template-applied " : ""}patient record PDF ready: ${resp.document.filename}`,
+        );
+        openStoredPdf(resp.document.stored_path, resp.document.filename || "Patient Record PDF");
+        await refreshGeneratedDocuments();
       } catch (e) {
         setUiError(e, "Failed to generate patient record PDF.");
       }
@@ -507,6 +928,7 @@ export default function DoctorPage() {
     const doctorLicense = window.prompt("Doctor license (optional)", "") ?? "";
     const clinicName = window.prompt("Clinic / facility name", "") ?? "";
     const restDays = restDaysRaw && /^\d+$/.test(restDaysRaw.trim()) ? Number(restDaysRaw.trim()) : null;
+    const templatePayload = buildMedicalCertificateTemplatePayload(doctorNote);
 
     setError("");
     setStatus("Generating medical certificate PDF...");
@@ -524,12 +946,74 @@ export default function DoctorPage() {
             doctor_license: doctorLicense,
             clinic_name: clinicName,
             additional_notes: doctorNote.slice(0, 1200),
+            patient_address: templatePayload.patient_address,
+            patient_gender: templatePayload.patient_gender,
+            patient_age: templatePayload.patient_age,
+            patient_age_gender: templatePayload.patient_age_gender,
+            requested_for: templatePayload.requested_for,
+            use_doctor_template: useMedicalCertificateTemplateForPdf,
+            certificate_title: useMedicalCertificateTemplateForPdf
+              ? "Medical Certificate (Doctor Template)"
+              : "Medical Certificate",
           },
         );
-        setStatus(`Medical certificate PDF ready: ${resp.document.filename}`);
-        openStoredPdf(resp.document.stored_path);
+        setStatus(
+          `${useMedicalCertificateTemplateForPdf ? "Template-applied " : ""}medical certificate PDF ready: ${resp.document.filename}`,
+        );
+        openStoredPdf(resp.document.stored_path, resp.document.filename || "Medical Certificate PDF");
+        await refreshGeneratedDocuments();
       } catch (e) {
         setUiError(e, "Failed to generate medical certificate PDF.");
+      }
+    });
+  };
+
+  const generateMedicalCertificatePdfAi = () => {
+    const clean = doctorNote.trim();
+    if (!clean) {
+      setError("Doctor note is empty.");
+      return;
+    }
+    const patientName =
+      apptPatientName.trim() || extractPatientNameFromText(clean);
+    if (!patientName) {
+      setError("Patient name is required before generating AI medical certificate.");
+      return;
+    }
+    const templatePayload = buildMedicalCertificateTemplatePayload(clean);
+
+    setError("");
+    setStatus("Generating AI medical certificate PDF...");
+    startBusy(async () => {
+      try {
+        const resp = await postJson<{
+          ok: boolean;
+          document: GeneratedPdfDocument;
+          ai_used?: boolean;
+        }>("/documents/medical_certificate_pdf_ai", {
+          patient_name: patientName,
+          patient_dob: templatePayload.patient_dob,
+          patient_address: templatePayload.patient_address,
+          patient_gender: templatePayload.patient_gender,
+          patient_age: templatePayload.patient_age,
+          patient_age_gender: templatePayload.patient_age_gender,
+          doctor_note: clean,
+          analysis,
+          appointment_reason: apptReason,
+          appointment_notes: apptNotes,
+          requested_for: templatePayload.requested_for,
+          use_doctor_template: useMedicalCertificateTemplateForPdf,
+          certificate_title: useMedicalCertificateTemplateForPdf
+            ? "Medical Certificate (Doctor Template)"
+            : "Medical Certificate",
+        });
+        setStatus(
+          `${useMedicalCertificateTemplateForPdf ? "Template-applied " : ""}medical certificate PDF ready (${resp.ai_used ? "LLM draft" : "fallback draft"}): ${resp.document.filename}`,
+        );
+        openStoredPdf(resp.document.stored_path, resp.document.filename || "Medical Certificate PDF");
+        await refreshGeneratedDocuments();
+      } catch (e) {
+        setUiError(e, "Failed to generate AI medical certificate PDF.");
       }
     });
   };
@@ -643,6 +1127,20 @@ export default function DoctorPage() {
     });
   };
 
+  if (!accessChecked) {
+    return (
+      <main className="shell">
+        <section className="panel">
+          <p className="small-meta">Checking access...</p>
+        </section>
+      </main>
+    );
+  }
+
+  const quickPdfDocuments = generatedDocuments.filter((d) =>
+    ((d.filename || d.path || "").trim().toLowerCase().endsWith(".pdf")),
+  );
+
   return (
     <main className="shell stack" data-testid="doctor-page">
       <section className="hero">
@@ -656,6 +1154,15 @@ export default function DoctorPage() {
         <nav className="hero-nav">
           <Link href="/">Home</Link>
           <Link href="/assistant">Assistant Portal</Link>
+          <button
+            className="nav-chip-btn"
+            type="button"
+            data-testid="doctor-logout"
+            onClick={handleLogout}
+            disabled={busy}
+          >
+            Logout
+          </button>
           <button
             className="nav-chip-btn"
             data-testid="doctor-refresh-kb"
@@ -891,72 +1398,209 @@ export default function DoctorPage() {
       </div>
 
       <div className="page-grid columns-2">
-        <Panel title="Doctor Note" subtitle="Main case narrative workspace">
-          <div className="toolbar">
-            <button
-              className="btn"
-              data-testid="doctor-attach-file-label"
-              onClick={() => void toggleAssistantIntakePicker()}
-            >
-              Attach assistant patient record
-            </button>
-            <label className="btn ghost" data-testid="doctor-upload-local-file-label">
-              Upload local file (PDF/Text/Image)
-              <input
-                hidden
-                type="file"
-                data-testid="doctor-attach-file-input"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) void handleAttachFile(file);
-                  e.currentTarget.value = "";
-                }}
-              />
-            </label>
-            <button
-              className="btn accent"
-              data-testid="doctor-revise-report"
-              disabled={busy}
-              onClick={handleRevise}
-            >
-              Revise Report
-            </button>
-            <button
-              className="btn primary"
-              data-testid="doctor-analyze-case"
-              disabled={busy}
-              onClick={handleAnalyze}
-            >
-              Analyze Case
-            </button>
-            <button
-              className="btn"
-              data-testid="doctor-save-patient-record"
-              disabled={busy}
-              onClick={handleSavePatientRecord}
-            >
-              Save Patient Record
-            </button>
-            <button
-              className="btn"
-              data-testid="doctor-generate-patient-pdf"
-              disabled={busy}
-              onClick={generatePatientRecordPdf}
-            >
-              Generate Patient Record PDF
-            </button>
-            <button
-              className="btn"
-              data-testid="doctor-generate-certificate-pdf"
-              disabled={busy}
-              onClick={generateMedicalCertificatePdf}
-            >
-              Generate Medical Certificate PDF
-            </button>
-            <button className="btn" data-testid="doctor-clear-note" onClick={() => setDoctorNote("")}>
-              Clear
-            </button>
+        <Panel title="Doctor Note" subtitle="Follow steps below to complete a doctor-reviewed case">
+          <div className="panel" style={{ padding: 12 }}>
+            <strong>Recommended flow</strong>
+            <ol className="workflow-steps">
+              <li>Load assistant patient record first, then review the drafted note.</li>
+              <li>Run case analysis and revise wording if needed.</li>
+              <li>Save patient record to host storage.</li>
+              <li>Generate final PDFs for patient record and certificate.</li>
+            </ol>
+            <div style={{ marginTop: 10 }}>
+              <label
+                style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 600 }}
+              >
+                <input
+                  type="checkbox"
+                  data-testid="doctor-template-toggle"
+                  checked={useDoctorTemplateForPdf}
+                  onChange={(e) => setUseDoctorTemplateForPdf(e.target.checked)}
+                />
+                Allow Doctor&apos;s Template for Patient Record PDF
+              </label>
+              <SmallMeta>
+                If enabled, the Doctor Note content is wrapped in your prescription-style template
+                before generating the patient-record PDF.
+              </SmallMeta>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label
+                style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 600 }}
+              >
+                <input
+                  type="checkbox"
+                  data-testid="doctor-medcert-template-toggle"
+                  checked={useMedicalCertificateTemplateForPdf}
+                  onChange={(e) => setUseMedicalCertificateTemplateForPdf(e.target.checked)}
+                />
+                Allow Doctor&apos;s Template for Medical Certificate PDF
+              </label>
+              <SmallMeta>
+                If enabled, Medical Certificate PDF follows the template layout with fixed
+                clinic header and certificate body format.
+              </SmallMeta>
+            </div>
           </div>
+
+          <div className="action-help-grid" style={{ marginTop: 10 }}>
+            <div className="action-help-item">
+              <button
+                className="btn primary"
+                data-testid="doctor-attach-file-label"
+                onClick={() => void toggleAssistantIntakePicker()}
+              >
+                1) Attach assistant patient record
+              </button>
+              <SmallMeta>
+                Start here. Select the patient created by assistant so Doctor Note can be prefilled.
+              </SmallMeta>
+            </div>
+
+            <div className="action-help-item">
+              <label className="btn accent action-help-upload" data-testid="doctor-upload-local-file-label">
+                Upload local file (PDF/Text/Image)
+                <input
+                  hidden
+                  type="file"
+                  data-testid="doctor-attach-file-input"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void handleAttachFile(file);
+                    e.currentTarget.value = "";
+                  }}
+                />
+              </label>
+              <SmallMeta>
+                Optional. Add extra doctor documents/lab files to append text into Doctor Note.
+              </SmallMeta>
+            </div>
+
+            <div className="action-help-item">
+              <button
+                className="btn primary"
+                data-testid="doctor-analyze-case"
+                disabled={busy}
+                onClick={handleAnalyze}
+              >
+                2) Analyze Case
+              </button>
+              <SmallMeta>
+                Generates AI clinical support output on the right panel for doctor review.
+              </SmallMeta>
+            </div>
+
+            <div className="action-help-item">
+              <button
+                className="btn accent"
+                data-testid="doctor-revise-report"
+                disabled={busy}
+                onClick={handleRevise}
+              >
+                Revise Report
+              </button>
+              <SmallMeta>
+                Optional rewrite. Improves structure of Doctor Note while keeping original facts.
+              </SmallMeta>
+            </div>
+
+            <div className="action-help-item">
+              <button
+                className="btn primary"
+                data-testid="doctor-save-patient-record"
+                disabled={busy}
+                onClick={handleSavePatientRecord}
+              >
+                3) Save Patient Record
+              </button>
+              <SmallMeta>
+                Persists this doctor note to host storage for future retrieval and audit trail.
+              </SmallMeta>
+            </div>
+
+            <div className="action-help-item">
+              <button
+                className="btn accent"
+                data-testid="doctor-generate-patient-pdf"
+                disabled={busy}
+                onClick={generatePatientRecordPdf}
+              >
+                4) Generate Patient Record PDF
+              </button>
+              <SmallMeta>
+                Exports the finalized patient case record to PDF for sharing/printing.
+              </SmallMeta>
+            </div>
+
+            <div className="action-help-item">
+              <button
+                className="btn primary"
+                data-testid="doctor-generate-certificate-pdf"
+                disabled={busy}
+                onClick={generateMedicalCertificatePdf}
+              >
+                Generate Medical Certificate PDF
+              </button>
+              <SmallMeta>
+                Optional. Creates medical certificate PDF after diagnosis/recommendation inputs.
+              </SmallMeta>
+            </div>
+
+            <div className="action-help-item">
+              <button className="btn danger" data-testid="doctor-clear-note" onClick={() => setDoctorNote("")}>
+                Clear
+              </button>
+              <SmallMeta>Resets Doctor Note text area for a new case draft.</SmallMeta>
+            </div>
+          </div>
+
+          <div className="panel stack" style={{ marginTop: 12, padding: 12, gap: 8 }} data-testid="doctor-quick-pdf-card">
+            <strong>Patient Record Files</strong>
+            <SmallMeta>
+              After saving a patient record, select a file below to open PDF reader popup (view or print).
+            </SmallMeta>
+            <div className="toolbar">
+              <button
+                className="btn"
+                data-testid="doctor-refresh-quick-pdf-list"
+                onClick={() => void refreshPatientRecords()}
+              >
+                Refresh file list
+              </button>
+              <button
+                className="btn accent"
+                data-testid="doctor-generate-census"
+                onClick={generateCensus}
+              >
+                Generate Census
+              </button>
+            </div>
+            <div className="list scroll-list" data-testid="doctor-quick-pdf-list">
+              {quickPdfDocuments.length === 0 ? (
+                <div className="list-item">
+                  <SmallMeta>No PDF patient files available yet.</SmallMeta>
+                </div>
+              ) : (
+                quickPdfDocuments.map((d) => (
+                  <div className="list-item" key={`quick-${d.id}`} data-testid="doctor-quick-pdf-item">
+                    <strong>{d.patient_name || "(Unnamed patient)"}</strong>
+                    <SmallMeta>{d.filename}</SmallMeta>
+                    <SmallMeta>
+                      Type: {d.document_type || "document"} | Created: {d.created_at || "-"}
+                    </SmallMeta>
+                    <button
+                      className="btn primary"
+                      data-testid={`doctor-open-quick-pdf-${d.id}`}
+                      onClick={() => openStoredPdf(d.stored_path, d.filename || d.title || "Patient document")}
+                    >
+                      Open PDF (View/Print)
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
           {showAssistantIntakePicker ? (
             <div
               className="panel stack"
@@ -980,23 +1624,31 @@ export default function DoctorPage() {
                   ))}
                 </select>
               </div>
-              <div className="toolbar">
-                <button
-                  className="btn primary"
-                  data-testid="doctor-open-selected-intake"
-                  disabled={busy || !selectedAssistantIntakeId}
-                  onClick={() => openAssistantIntakeAndAnalyze(selectedAssistantIntakeId)}
-                >
-                  Open Selected Patient + Analyze
-                </button>
-                <button
-                  className="btn"
-                  data-testid="doctor-refresh-intake-picker"
-                  disabled={busy}
-                  onClick={() => void refreshPatientRecords()}
-                >
-                  Refresh patient records
-                </button>
+              <div className="action-help-grid">
+                <div className="action-help-item">
+                  <button
+                    className="btn primary"
+                    data-testid="doctor-open-selected-intake"
+                    disabled={busy || !selectedAssistantIntakeId}
+                    onClick={() => openAssistantIntakeAndAnalyze(selectedAssistantIntakeId)}
+                  >
+                    Open Selected Patient + Analyze
+                  </button>
+                  <SmallMeta>
+                    Loads intake into Doctor Note, opens patient PDF, then runs AI analysis.
+                  </SmallMeta>
+                </div>
+                <div className="action-help-item">
+                  <button
+                    className="btn"
+                    data-testid="doctor-refresh-intake-picker"
+                    disabled={busy}
+                    onClick={() => void refreshPatientRecords()}
+                  >
+                    Refresh patient records
+                  </button>
+                  <SmallMeta>Use this if newly saved assistant records are not yet listed.</SmallMeta>
+                </div>
               </div>
               <SmallMeta>
                 Selecting a patient loads the assistant intake into Doctor Note,
@@ -1011,6 +1663,50 @@ export default function DoctorPage() {
             placeholder="Paste or dictate doctor note here..."
             style={{ minHeight: 360, marginTop: 12 }}
           />
+          <div className="panel stack" style={{ marginTop: 12, padding: 12, gap: 8 }}>
+            <strong>Prescription (RX) attachment</strong>
+            <div className="action-help-grid">
+              <div className="action-help-item">
+                <label className="btn accent action-help-upload" data-testid="doctor-attach-rx-label">
+                  Attach Handwritten RX (Image/PDF)
+                  <input
+                    hidden
+                    type="file"
+                    accept="image/*,.pdf,application/pdf"
+                    data-testid="doctor-attach-rx-input"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void handleAttachHandwrittenRx(file);
+                      e.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+                <SmallMeta>
+                  Upload doctor handwritten RX and the system will OCR-parse it into text,
+                  then append it to Doctor Note so it is saved with the patient record.
+                </SmallMeta>
+              </div>
+            </div>
+          </div>
+          <div className="panel stack" style={{ marginTop: 12, padding: 12, gap: 8 }}>
+            <strong>Final step: AI certificate output</strong>
+            <div className="action-help-grid">
+              <div className="action-help-item">
+                <button
+                  className="btn accent"
+                  data-testid="doctor-generate-certificate-ai-bottom"
+                  disabled={busy}
+                  onClick={generateMedicalCertificatePdfAi}
+                >
+                  Generate Medical Certificate (AI)
+                </button>
+                <SmallMeta>
+                  Uses Doctor Note, AI Analysis, and scheduling notes to auto-draft
+                  certificate content, then exports a Medical Certificate PDF.
+                </SmallMeta>
+              </div>
+            </div>
+          </div>
         </Panel>
 
         <Panel
@@ -1250,6 +1946,18 @@ export default function DoctorPage() {
                     <div className="toolbar">
                       <button
                         className="btn"
+                        data-testid={`doctor-open-record-file-${r.id}`}
+                        onClick={() =>
+                          openStoredPdf(
+                            `/storage/${(r.path || "").replace(/^\/+/, "")}`,
+                            r.filename || r.title || "Doctor record",
+                          )
+                        }
+                      >
+                        Open file
+                      </button>
+                      <button
+                        className="btn"
                         data-testid={`doctor-append-record-${r.id}`}
                         onClick={() => appendToNote(`[Patient record selected]\n${r.title}\n${r.filename}`)}
                       >
@@ -1291,14 +1999,74 @@ export default function DoctorPage() {
                       >
                         Open + Analyze
                       </button>
+                      <button
+                        className="btn"
+                        data-testid={`doctor-open-intake-pdf-${i.id}`}
+                        onClick={() => openAssistantIntakePdf(i.id)}
+                      >
+                        Open intake PDF
+                      </button>
                     </div>
                   </div>
                 ))
               )}
             </div>
           </div>
+
         </div>
       </Panel>
+
+      {documentViewer ? (
+        <div
+          className="doc-modal-backdrop"
+          data-testid="doctor-document-modal"
+          onClick={() => setDocumentViewer(null)}
+        >
+          <div className="doc-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="doc-modal-header">
+              <strong>{documentViewer.title}</strong>
+              <div className="toolbar">
+                <button
+                  className="btn primary"
+                  data-testid="doctor-document-print"
+                  onClick={printActiveDocument}
+                >
+                  Print
+                </button>
+                <button
+                  className="btn"
+                  data-testid="doctor-document-open-new-tab"
+                  onClick={openDocumentInNewTab}
+                >
+                  View in browser tab
+                </button>
+                <button
+                  className="btn danger"
+                  data-testid="doctor-document-close-viewer"
+                  onClick={() => setDocumentViewer(null)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            <iframe
+              ref={documentViewerRef}
+              src={documentViewer.url}
+              title={documentViewer.title}
+              style={{
+                width: "100%",
+                minHeight: "70vh",
+                border: "1px solid rgba(16, 32, 25, 0.14)",
+                borderRadius: 12,
+                background: "white",
+              }}
+            />
+            <SmallMeta>
+              If preview is blocked by browser/PDF plugin, click &quot;View in browser tab&quot; then print there.
+            </SmallMeta>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

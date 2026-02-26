@@ -15,13 +15,13 @@ export default function HomePage() {
 
       <section className="portal-grid">
         <PortalCard
-          href="/assistant"
+          href="/login/?next=assistant"
           title="Medical Assistant Portal"
           description="Structured patient intake, lab text capture, AI-enhanced intake summaries, and saved intake records."
           accent="#0c8f64"
         />
         <PortalCard
-          href="/doctor"
+          href="/login/?next=doctor"
           title="Medical Doctor Workspace"
           description="Doctor notes, attachments, AI chat, case analysis, medical references, KB training, and patient records."
           accent="#ef8c23"

@@ -5,11 +5,11 @@ function computeApiBase(): string {
   if (envBase) return envBase.replace(/\/+$/, "");
 
   if (typeof window !== "undefined" && window.location?.origin) {
-    const origin = window.location.origin;
+    const { origin, hostname, port } = window.location;
     const isLikelyNextDev =
-      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") &&
-      window.location.port === "3000";
-    return isLikelyNextDev ? "http://127.0.0.1:8080" : origin;
+      (hostname === "localhost" || hostname === "127.0.0.1") &&
+      port === "3000";
+    return isLikelyNextDev ? `http://${hostname}:8080` : origin;
   }
 
   return "http://127.0.0.1:8080";
@@ -32,7 +32,10 @@ async function parseResponse<T>(resp: Response): Promise<T> {
 }
 
 export async function getJson<T>(path: string): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
+  const resp = await fetch(`${API_BASE}${path}`, {
+    cache: "no-store",
+    credentials: "include",
+  });
   return parseResponse<T>(resp);
 }
 
@@ -41,6 +44,7 @@ export async function postJson<T>(path: string, body: unknown): Promise<T> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    credentials: "include",
   });
   return parseResponse<T>(resp);
 }
@@ -50,6 +54,7 @@ export async function patchJson<T>(path: string, body: unknown): Promise<T> {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    credentials: "include",
   });
   return parseResponse<T>(resp);
 }
@@ -61,6 +66,7 @@ export async function postMultipart<T>(
   const resp = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     body: form,
+    credentials: "include",
   });
   return parseResponse<T>(resp);
 }
@@ -77,4 +83,3 @@ export const api = {
       generate_enhanced_report: generateEnhancedReport,
     }),
 };
-

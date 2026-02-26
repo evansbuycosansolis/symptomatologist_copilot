@@ -12,7 +12,9 @@ import {
   type PatientIntakeData,
 } from "@/lib/types";
 import Link from "next/link";
-import { startTransition, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { startTransition, useEffect, useRef, useState, useTransition } from "react";
+import { ensureFreshLoginState, fetchPortalSession, logoutPortal, type PortalRole } from "@/lib/portal-auth";
 
 type IntakeKey = keyof PatientIntakeData;
 
@@ -89,6 +91,7 @@ const labKeys: IntakeKey[] = [
 ];
 
 export default function AssistantPage() {
+  const router = useRouter();
   const [intake, setIntake] = useState<PatientIntakeData>(emptyIntake);
   const [enhancedReport, setEnhancedReport] = useState("");
   const [recent, setRecent] = useState<IntakeListItem[]>([]);
@@ -103,6 +106,37 @@ export default function AssistantPage() {
   const [apptReason, setApptReason] = useState("");
   const [apptNotes, setApptNotes] = useState("");
   const [allowWaitlist, setAllowWaitlist] = useState(true);
+  const [portalRole, setPortalRoleState] = useState<PortalRole | null>(null);
+  const [accessChecked, setAccessChecked] = useState(false);
+  const [documentViewer, setDocumentViewer] = useState<{ url: string; title: string } | null>(null);
+  const documentViewerRef = useRef<HTMLIFrameElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      await ensureFreshLoginState();
+      if (cancelled) return;
+      const role = await fetchPortalSession();
+      if (cancelled) return;
+      if (!role) {
+        router.replace("/login/?next=assistant");
+        return;
+      }
+      setPortalRoleState(role);
+      setAccessChecked(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const notice = (new URLSearchParams(window.location.search).get("notice") || "").toLowerCase();
+    if (notice === "doctor_locked") {
+      setStatus("Doctor workspace is restricted for assistant accounts.");
+    }
+  }, []);
 
   const setField = (key: IntakeKey, value: string) =>
     setIntake((prev) => ({ ...prev, [key]: value }));
@@ -146,7 +180,7 @@ export default function AssistantPage() {
             title: `Patient Record - ${patientName}`,
           },
         );
-        openStoredPdf(resp.document.stored_path);
+        openStoredPdf(resp.document.stored_path, resp.document.filename || "Patient record PDF");
         setStatus(`Opened patient PDF: ${resp.document.filename}`);
       } catch (e) {
         setStatus("Patient PDF is unavailable in this build. Intake loaded into form.");
@@ -223,9 +257,40 @@ export default function AssistantPage() {
     }
   };
 
-  const openStoredPdf = (storedPath: string) => {
+  const normalizeStoredPath = (path: string) => {
+    const clean = (path || "").trim();
+    if (!clean) return "";
+    if (clean.startsWith("/")) return clean;
+    return `/storage/${clean.replace(/^\/+/, "")}`;
+  };
+
+  const openStoredPdf = (storedPath: string, title = "Patient document") => {
     if (typeof window === "undefined") return;
-    window.open(storedPath, "_blank", "noopener,noreferrer");
+    const normalized = normalizeStoredPath(storedPath);
+    if (!normalized) return;
+    setDocumentViewer({ url: normalized, title });
+  };
+
+  const openDocumentInNewTab = () => {
+    if (typeof window === "undefined") return;
+    if (!documentViewer?.url) return;
+    window.open(documentViewer.url, "_blank", "noopener,noreferrer");
+  };
+
+  const printActiveDocument = () => {
+    if (typeof window === "undefined") return;
+    const iframe = documentViewerRef.current;
+    try {
+      iframe?.contentWindow?.focus();
+      iframe?.contentWindow?.print();
+      return;
+    } catch {
+      // Fallback below
+    }
+    if (documentViewer?.url) {
+      window.open(documentViewer.url, "_blank", "noopener,noreferrer");
+      setStatus("Opened document in a new tab. Use browser print there.");
+    }
   };
 
   const generatePatientRecordPdf = () => {
@@ -247,7 +312,7 @@ export default function AssistantPage() {
           },
         );
         setStatus(`Patient record PDF ready: ${resp.document.filename}`);
-        openStoredPdf(resp.document.stored_path);
+        openStoredPdf(resp.document.stored_path, resp.document.filename || "Patient record PDF");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to generate patient record PDF.");
       }
@@ -286,7 +351,7 @@ export default function AssistantPage() {
           },
         );
         setStatus(`Medical certificate PDF ready: ${resp.document.filename}`);
-        openStoredPdf(resp.document.stored_path);
+        openStoredPdf(resp.document.stored_path, resp.document.filename || "Medical certificate PDF");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to generate medical certificate PDF.");
       }
@@ -335,6 +400,28 @@ export default function AssistantPage() {
     });
   };
 
+  const handleLogout = () => {
+    setError("");
+    setStatus("Signing out...");
+    startBusy(async () => {
+      try {
+        await logoutPortal();
+      } finally {
+        router.replace("/login/?fresh=1");
+      }
+    });
+  };
+
+  if (!accessChecked) {
+    return (
+      <main className="shell">
+        <section className="panel">
+          <p className="small-meta">Checking access...</p>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="shell stack" data-testid="assistant-page">
       <section className="hero">
@@ -347,7 +434,22 @@ export default function AssistantPage() {
         </p>
         <nav className="hero-nav">
           <Link href="/">Home</Link>
-          <Link href="/doctor">Doctor Workspace</Link>
+          {portalRole === "doctor" ? (
+            <Link href="/doctor">Doctor Workspace</Link>
+          ) : (
+            <button className="nav-chip-btn" type="button" disabled title="Doctor login required">
+              Doctor Workspace (Doctor only)
+            </button>
+          )}
+          <button
+            className="nav-chip-btn"
+            type="button"
+            data-testid="assistant-logout"
+            onClick={handleLogout}
+            disabled={isBusy}
+          >
+            Logout
+          </button>
           <button
             className="nav-chip-btn"
             data-testid="assistant-refresh-records"
@@ -711,6 +813,54 @@ export default function AssistantPage() {
             ))
           )}
         </div>
+      </Panel>
+
+      <Panel title="Document Viewer + Print" subtitle="Preview generated documents and print from browser">
+        {documentViewer ? (
+          <div className="stack" style={{ gap: 10 }} data-testid="assistant-document-viewer">
+            <SmallMeta>{documentViewer.title}</SmallMeta>
+            <div className="toolbar">
+              <button
+                className="btn primary"
+                data-testid="assistant-document-print"
+                onClick={printActiveDocument}
+              >
+                Print
+              </button>
+              <button
+                className="btn"
+                data-testid="assistant-document-open-new-tab"
+                onClick={openDocumentInNewTab}
+              >
+                Open in new tab
+              </button>
+              <button
+                className="btn danger"
+                data-testid="assistant-document-close-viewer"
+                onClick={() => setDocumentViewer(null)}
+              >
+                Close viewer
+              </button>
+            </div>
+            <iframe
+              ref={documentViewerRef}
+              src={documentViewer.url}
+              title={documentViewer.title}
+              style={{
+                width: "100%",
+                minHeight: 560,
+                border: "1px solid rgba(16, 32, 25, 0.14)",
+                borderRadius: 12,
+                background: "white",
+              }}
+            />
+            <SmallMeta>
+              If preview is blocked by browser/PDF plugin, click &quot;Open in new tab&quot; then print there.
+            </SmallMeta>
+          </div>
+        ) : (
+          <SmallMeta>Open any patient PDF/certificate to preview and print it here.</SmallMeta>
+        )}
       </Panel>
     </main>
   );

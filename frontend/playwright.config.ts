@@ -41,6 +41,7 @@ export default defineConfig({
         HOST: "127.0.0.1",
         PORT: "8080",
         FRONTEND_ORIGIN: "http://localhost:3000",
+        AUTH_SECRET: "e2e-auth-secret",
       },
     },
     {
@@ -51,7 +52,7 @@ export default defineConfig({
       timeout: 180_000,
       env: {
         ...process.env,
-        NEXT_PUBLIC_API_BASE_URL: "http://127.0.0.1:8080",
+        NEXT_PUBLIC_API_BASE_URL: "http://localhost:8080",
       },
     },
   ],

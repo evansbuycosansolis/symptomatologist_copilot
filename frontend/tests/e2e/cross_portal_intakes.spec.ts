@@ -1,9 +1,10 @@
 import { expect, test } from "@playwright/test";
+import { loginAsAssistant, loginAsDoctor } from "./helpers/auth";
 
 test("doctor can retrieve assistant intakes", async ({ page }) => {
   const uniqueName = `E2E Intake Visible ${Date.now()}`;
 
-  await page.goto("/assistant");
+  await loginAsAssistant(page);
   await expect(page.getByTestId("assistant-page")).toBeVisible();
   await page.getByTestId("assistant-FullName").fill(uniqueName);
   await page.getByTestId("assistant-DateOfBirth").fill("1992-04-15");
@@ -15,8 +16,10 @@ test("doctor can retrieve assistant intakes", async ({ page }) => {
   await expect(page.getByTestId("assistant-recent-list")).toContainText(
     uniqueName,
   );
+  await page.getByTestId("assistant-logout").click();
+  await expect(page).toHaveURL(/\/login\/?$/);
 
-  await page.goto("/doctor");
+  await loginAsDoctor(page);
   await expect(page.getByTestId("doctor-page")).toBeVisible();
   await page.getByTestId("doctor-refresh-patient-records").click();
 

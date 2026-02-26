@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import fs from "node:fs/promises";
+import { loginAsAssistant } from "./helpers/auth";
 
 const TINY_PNG = Buffer.from(
   "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de0000000c4944415408996360600000000400010be7029d0000000049454e44ae426082",
@@ -25,7 +26,7 @@ test("assistant workflow: fill intake, upload lab image, generate and save, load
   const labPath = testInfo.outputPath("lab1.png");
   await fs.writeFile(labPath, TINY_PNG);
 
-  await page.goto("/assistant");
+  await loginAsAssistant(page);
   await expect(page.getByTestId("assistant-page")).toBeVisible();
 
   await page.getByTestId("assistant-FullName").fill(uniqueName);

@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import fs from "node:fs/promises";
+import { loginAsDoctor } from "./helpers/auth";
 
 test("doctor workflow: attachments, chat, analysis, patient record, kb train/ask, mocked external lookups", async ({
   page,
@@ -43,7 +44,7 @@ test("doctor workflow: attachments, chat, analysis, patient record, kb train/ask
     "Migraine red flags include sudden onset thunderclap headache and focal neurological deficits.",
   );
 
-  await page.goto("/doctor");
+  await loginAsDoctor(page);
   await expect(page.getByTestId("doctor-page")).toBeVisible();
 
   await page.getByTestId("doctor-attach-file-input").setInputFiles(attachPath);

@@ -12,6 +12,14 @@ import main as backend_main  # noqa: E402
 client = TestClient(backend_main.app)
 
 
+def _login_as_doctor() -> None:
+    resp = client.post(
+        "/auth/login",
+        json={"role": "doctor", "pin": backend_main.DOCTOR_PIN},
+    )
+    assert resp.status_code == 200, resp.text
+
+
 def _assert_pdf_document(resp_json: dict) -> None:
     assert resp_json.get("ok") is True
     doc = resp_json.get("document") or {}
@@ -24,6 +32,7 @@ def _assert_pdf_document(resp_json: dict) -> None:
 
 
 def test_generate_intake_pdf():
+    _login_as_doctor()
     resp = client.post(
         "/documents/intake_pdf",
         json={
@@ -44,6 +53,7 @@ def test_generate_intake_pdf():
 
 
 def test_generate_patient_record_pdf():
+    _login_as_doctor()
     resp = client.post(
         "/documents/patient_record_pdf",
         json={
@@ -62,6 +72,7 @@ def test_generate_patient_record_pdf():
 
 
 def test_generate_medical_certificate_pdf():
+    _login_as_doctor()
     resp = client.post(
         "/documents/medical_certificate_pdf",
         json={
@@ -79,6 +90,39 @@ def test_generate_medical_certificate_pdf():
     _assert_pdf_document(data)
     assert "_MC.pdf" in str(data.get("document", {}).get("filename", ""))
     assert "Certificate Patient (1975-11-30)" in str(data.get("document", {}).get("filename", ""))
+
+
+def test_generate_ai_medical_certificate_pdf(monkeypatch):
+    _login_as_doctor()
+    monkeypatch.setattr(
+        backend_main,
+        "openai_chat",
+        lambda _messages: (
+            '{"diagnosis":"Acute pharyngitis",'
+            '"recommendations":"Rest, hydration, and follow-up in 3 days.",'
+            '"rest_days":2,'
+            '"valid_until":"2026-03-01",'
+            '"additional_notes":"Generated from doctor context"}'
+        ),
+    )
+
+    resp = client.post(
+        "/documents/medical_certificate_pdf_ai",
+        json={
+            "patient_name": "AI Certificate Patient",
+            "patient_dob": "1993-05-20",
+            "doctor_note": "Full Name: AI Certificate Patient\nDate of Birth: 1993-05-20\nClinical note content.",
+            "analysis": "Likely upper respiratory infection. Red flags absent.",
+            "appointment_reason": "Sore throat and fever",
+            "appointment_notes": "Return if symptoms worsen.",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    _assert_pdf_document(data)
+    assert data.get("ai_used") is True
+    assert "_MC.pdf" in str(data.get("document", {}).get("filename", ""))
+    assert "AI Certificate Patient (1993-05-20)" in str(data.get("document", {}).get("filename", ""))
 
 
 def test_builtin_pdf_engine_works_without_reportlab(monkeypatch):
@@ -99,6 +143,7 @@ def test_builtin_pdf_engine_works_without_reportlab(monkeypatch):
 
 
 def test_generate_intake_pdf_without_reportlab(monkeypatch):
+    _login_as_doctor()
     monkeypatch.setattr(backend_main, "canvas", None)
     monkeypatch.setattr(backend_main, "A4", None)
     monkeypatch.setattr(backend_main, "mm", None)

@@ -114,7 +114,12 @@ Write-Utf8NoBomLines -Path $EnvPath -Lines @(
   "OPENAI_MODEL=gpt-4o-mini",
   "HOST=127.0.0.1",
   "PORT=8080",
-  "FRONTEND_ORIGIN=http://127.0.0.1:8080"
+  "FRONTEND_ORIGIN=http://127.0.0.1:8080",
+  "DOCTOR_PIN=""docbayson888#""",
+  "ASSISTANT_PIN=assistant123",
+  "AUTH_SECRET=change-this-long-random-secret",
+  "AUTH_COOKIE_SECURE=0",
+  "AUTH_COOKIE_PERSIST=0"
 )
 
 # Launcher
@@ -125,8 +130,8 @@ $BatPath = Join-Path $OutDir "start-webapp.bat"
   'cd /d %~dp0',
   'start "CoPilot Symptomatologist" /b .\copilot_backend.exe',
   'timeout /t 2 >nul',
-  'start "" http://127.0.0.1:8080',
-  'echo Webapp running at http://127.0.0.1:8080',
+  'start "" http://127.0.0.1:8080/login/?fresh=1',
+  'echo Webapp running at http://127.0.0.1:8080/login/?fresh=1',
   'echo Close this window to stop the launcher; backend keeps running.',
   'pause'
 ) | Set-Content -Encoding ascii $BatPath
@@ -220,7 +225,12 @@ Write-Utf8NoBomLines -Path $HostEnvPath -Lines @(
   "OPENAI_MODEL=gpt-4o-mini",
   "HOST=0.0.0.0",
   "PORT=8080",
-  "FRONTEND_ORIGIN=http://127.0.0.1:8080"
+  "FRONTEND_ORIGIN=http://127.0.0.1:8080",
+  "DOCTOR_PIN=""docbayson888#""",
+  "ASSISTANT_PIN=assistant123",
+  "AUTH_SECRET=change-this-long-random-secret",
+  "AUTH_COOKIE_SECURE=0",
+  "AUTH_COOKIE_PERSIST=0"
 )
 
 # Host launcher
@@ -231,10 +241,10 @@ $HostStartBat = Join-Path $HostOutDir "Symptomatologist Copilot (Host).bat"
   'cd /d %~dp0',
   'start "Symptomatologist Copilot" /b .\\copilot_backend.exe',
   'timeout /t 2 >nul',
-  'start "" http://127.0.0.1:8080/doctor/',
+  'start "" http://127.0.0.1:8080/login/?next=doctor^&fresh=1',
   'echo Symptomatologist Copilot HOST is running.',
-  'echo Doctor portal (on this HOST PC): http://127.0.0.1:8080/doctor/',
-  'echo Assistant portal (from Assistant PC): http://^<THIS_PC_IP^>:8080/assistant/',
+  'echo Login portal (on this HOST PC): http://127.0.0.1:8080/login/?next=doctor^&fresh=1',
+  'echo Assistant login portal (from Assistant PC): http://^<THIS_PC_IP^>:8080/login/?next=assistant^&fresh=1',
   'echo Tip: run ipconfig to find THIS_PC_IP (IPv4 Address).',
   'pause'
 ) | Set-Content -Encoding ascii $HostStartBat
@@ -301,7 +311,7 @@ Write-Host "Creating HOST ZIP: $HostZip" -ForegroundColor Cyan
 Compress-WithRetry -SourcePath (Join-Path $HostOutDir "*") -DestinationPath $HostZip -Label "HOST ZIP"
 
 ###############################################################################
-# Assistant CLIENT package (launcher only)
+# Assistant CLIENT package
 ###############################################################################
 
 Write-Host "Assembling ASSISTANT client package: $AssistantOutDir ..." -ForegroundColor Cyan
@@ -323,8 +333,8 @@ $AssistantLauncher = Join-Path $AssistantOutDir "Symptomatologist Copilot (Assis
   '  set /p HOST=HOST IP: ',
   '  echo %HOST%>"%HOST_FILE%"',
   ')',
-  'start "" "http://%HOST%:8080/assistant/"',
-  'echo Opening Assistant portal at http://%HOST%:8080/assistant/',
+  'start "" "http://%HOST%:8080/login/?next=assistant^&fresh=1"',
+  'echo Opening Assistant login portal at http://%HOST%:8080/login/?next=assistant^&fresh=1',
   'echo If it does not load, check the HOST PC is running and firewall allows port 8080.',
   'echo Note: all data is stored on the HOST (Doctor) PC only.',
   'pause'
@@ -342,6 +352,28 @@ $AssistantSetHost = Join-Path $AssistantOutDir "Set Host IP - Symptomatologist C
   'pause'
 ) | Set-Content -Encoding ascii $AssistantSetHost
 
+$AssistantEdgeLoginBat = Join-Path $AssistantOutDir "Open Login Page - Symptomatologist Copilot (Assistant).bat"
+@(
+  '@echo off',
+  'setlocal EnableExtensions',
+  'set LOGIN_URL=http://192.168.1.8:8080/login/?next=assistant^&fresh=1',
+  'set EDGE_EXE=',
+  'if exist "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" set EDGE_EXE=%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe',
+  'if "%EDGE_EXE%"=="" if exist "%ProgramFiles%\Microsoft\Edge\Application\msedge.exe" set EDGE_EXE=%ProgramFiles%\Microsoft\Edge\Application\msedge.exe',
+  'if "%EDGE_EXE%"=="" set EDGE_EXE=msedge.exe',
+  'start "" "%EDGE_EXE%" "%LOGIN_URL%"',
+  'echo Opening login page in Microsoft Edge: %LOGIN_URL%',
+  'pause'
+) | Set-Content -Encoding ascii $AssistantEdgeLoginBat
+
+$AssistantLoginUrlIcon = Join-Path $AssistantOutDir "Symptomatologist Login Page (Assistant).url"
+@(
+  '[InternetShortcut]',
+  'URL=http://192.168.1.8:8080/login/?next=assistant&fresh=1',
+  'IconFile=%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe',
+  'IconIndex=0'
+) | Set-Content -Encoding ascii $AssistantLoginUrlIcon
+
 $AssistantShortcutPs1 = Join-Path $AssistantOutDir "create_desktop_shortcut_assistant.ps1"
 @(
   '$ErrorActionPreference = "Stop"',
@@ -353,7 +385,15 @@ $AssistantShortcutPs1 = Join-Path $AssistantOutDir "create_desktop_shortcut_assi
   '$s.TargetPath = $Target',
   '$s.WorkingDirectory = (Get-Location).Path',
   '$s.Save()',
-  'Write-Host "Created: $ShortcutPath"'
+  'Write-Host "Created: $ShortcutPath"',
+  '$LoginShortcutPath = Join-Path $Desktop "Symptomatologist Login Page (Assistant).lnk"',
+  '$LoginTarget = Join-Path (Get-Location) "Open Login Page - Symptomatologist Copilot (Assistant).bat"',
+  '$s2 = $WshShell.CreateShortcut($LoginShortcutPath)',
+  '$s2.TargetPath = $LoginTarget',
+  '$s2.WorkingDirectory = (Get-Location).Path',
+  '$s2.IconLocation = "$env:ProgramFiles(x86)\Microsoft\Edge\Application\msedge.exe,0"',
+  '$s2.Save()',
+  'Write-Host "Created: $LoginShortcutPath"'
 ) | Set-Content -Encoding utf8 $AssistantShortcutPs1
 
 $AssistantShortcutBat = Join-Path $AssistantOutDir "Create Desktop Shortcut - Symptomatologist Copilot (Assistant).bat"
