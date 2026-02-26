@@ -60,6 +60,8 @@ tmp/
 *.wav
 *.mp3
 *.mp4
+!sample_uploads/
+!sample_uploads/*.pdf
 
 # --- Local DB ---
 *.sqlite

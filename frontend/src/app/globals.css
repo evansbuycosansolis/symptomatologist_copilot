@@ -56,6 +56,32 @@ a {
   letter-spacing: -0.02em;
 }
 
+.doctor-hero-title {
+  display: inline-block;
+  width: fit-content;
+  padding: 0.4rem 0.7rem 0.45rem;
+  border-radius: 14px;
+  border: 1px solid rgba(12, 143, 100, 0.16);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.92),
+    rgba(233, 247, 240, 0.92)
+  );
+}
+
+.assistant-hero-title {
+  display: inline-block;
+  width: fit-content;
+  padding: 0.4rem 0.7rem 0.45rem;
+  border-radius: 14px;
+  border: 1px solid rgba(56, 124, 161, 0.2);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.92),
+    rgba(228, 241, 249, 0.92)
+  );
+}
+
 .hero p {
   margin: 0;
   color: var(--muted);
@@ -75,6 +101,16 @@ a {
   padding: 0.55rem 0.85rem;
   background: rgba(255, 255, 255, 0.65);
   backdrop-filter: blur(8px);
+}
+
+.hero-nav .nav-chip-btn {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.55rem 0.85rem;
+  background: rgba(255, 255, 255, 0.65);
+  color: inherit;
+  backdrop-filter: blur(8px);
+  cursor: pointer;
 }
 
 .page-grid {

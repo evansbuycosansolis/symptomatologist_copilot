@@ -1,0 +1,78 @@
+MOCK PATIENT DATA (COPY/PASTE)
+================================
+
+PATIENT DEMOGRAPHICS
+--------------------
+Full Name: Maria Isabel Santos
+Date of Birth: 1989-07-14
+Gender: Female
+Address: 124 Sampaguita St, Quezon City
+Phone Number: +63 917 555 0189
+Email: maria.santos.demo@email.com
+Emergency Contact Person: Roberto Santos (spouse)
+Emergency Contact Number: +63 917 555 0190
+
+VITALS
+------
+Blood Pressure: 128/82 mmHg
+Heart Rate: 88 bpm
+Respiratory Rate: 18 breaths/min
+Temperature: 37.4 C
+SpO2: 98%
+Height: 160 cm
+Weight: 68 kg
+BMI: 26.6
+
+CHIEF COMPLAINT / HPI
+---------------------
+Chief Complaint: Fever, sore throat, and dry cough for 3 days
+Onset Date: 2026-02-23
+Duration: 3 days
+Severity: Moderate
+Location: Throat and upper chest
+Associated Symptoms: Mild headache, body malaise, decreased appetite
+
+MEDICATIONS / SOCIAL
+--------------------
+Medications: None maintenance
+OTC Meds: Paracetamol 500 mg every 6 hours as needed
+Supplements: Vitamin C once daily
+Smoking Status: Non-smoker
+Alcohol Use: Occasional (1-2 drinks/week)
+Drug Use: Denies
+
+ALLERGIES / HISTORY
+-------------------
+Allergies: No known drug allergies
+Notable Family Medical History: Hypertension (mother), Type 2 diabetes (father)
+Past Medical History: Childhood asthma (inactive)
+Immunization History: Influenza vaccine 2025, COVID booster 2025
+Last Clinic Visit Notes: Last consult 8 months ago for allergic rhinitis
+Medical Assistant Notes: Patient alert, coherent, no respiratory distress at triage.
+
+LAB RESULT TEXT (PASTE INTO LAB RESULT 1 BOX)
+---------------------------------------------
+Complete Blood Count (CBC)
+Date: 2026-02-26 08:10
+Laboratory: Medilink Diagnostics
+
+WBC: 11.2 x10^9/L (High; ref 4.0-10.0)
+RBC: 4.53 x10^12/L (Normal; ref 3.80-5.10)
+Hemoglobin: 13.2 g/dL (Normal; ref 12.0-15.5)
+Hematocrit: 39.5% (Normal; ref 36.0-46.0)
+Platelets: 295 x10^9/L (Normal; ref 150-400)
+Neutrophils: 74% (High; ref 40-70)
+Lymphocytes: 18% (Low-normal; ref 20-45)
+
+Interpretation:
+Mild leukocytosis with neutrophil predominance, consistent with acute infection/inflammation.
+Correlate clinically with symptoms and physical examination.
+
+OPTIONAL DOCTOR NOTE BLOCK (FOR PDF NAMING WITH NAME + DOB)
+-----------------------------------------------------------
+Full Name: Maria Isabel Santos
+Date of Birth: 1989-07-14
+Clinical Summary:
+Patient with 3-day history of fever, sore throat, and dry cough.
+CBC shows mild leukocytosis and neutrophilia. No hemodynamic instability.
+Plan for symptomatic treatment, hydration, and follow-up in 48-72 hours.

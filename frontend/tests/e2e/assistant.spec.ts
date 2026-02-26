@@ -6,6 +6,18 @@ const TINY_PNG = Buffer.from(
   "hex",
 );
 
+function nextWeekdayIsoDate(): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  // Move forward until Monday-Friday.
+  for (let i = 0; i < 8; i += 1) {
+    const day = d.getDay(); // 0=Sun..6=Sat
+    if (day >= 1 && day <= 5) break;
+    d.setDate(d.getDate() + 1);
+  }
+  return d.toISOString().slice(0, 10);
+}
+
 test("assistant workflow: fill intake, upload lab image, generate and save, load recent", async ({
   page,
 }, testInfo) => {
@@ -28,7 +40,7 @@ test("assistant workflow: fill intake, upload lab image, generate and save, load
 
   await page.getByTestId("assistant-lab-upload-1").setInputFiles(labPath);
   await expect(page.getByTestId("assistant-status")).toContainText(
-    "Lab image 1 uploaded",
+    "Lab file 1 uploaded",
   );
   await expect(page.getByTestId("assistant-lab-text-1")).not.toHaveValue("");
 
@@ -48,7 +60,14 @@ test("assistant workflow: fill intake, upload lab image, generate and save, load
     .filter({ hasText: uniqueName })
     .first();
   await expect(recordItem).toBeVisible();
-  await recordItem.getByRole("button", { name: "Load into form" }).click();
-  await expect(page.getByTestId("assistant-status")).toContainText("Loaded intake");
+  await recordItem.getByRole("button", { name: "Open patient PDF" }).click();
+  await expect(page.getByTestId("assistant-status")).toContainText(/patient PDF/i);
   await expect(page.getByTestId("assistant-FullName")).toHaveValue(uniqueName);
+
+  await page.getByTestId("assistant-appt-date").fill(nextWeekdayIsoDate());
+  await page.getByTestId("assistant-appt-time").fill("10:00");
+  await page.getByTestId("assistant-appt-duration").selectOption("30");
+  await page.getByTestId("assistant-appt-reason").fill("Assistant scheduled follow-up");
+  await page.getByTestId("assistant-set-appointment").click();
+  await expect(page.getByTestId("assistant-status")).toContainText("Appointment");
 });

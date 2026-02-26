@@ -1,12 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_submodules
+
+hiddenimports = [
+    'multipart',
+    # The OpenAI Python SDK uses dynamic imports; bundle all submodules so the
+    # frozen EXE doesn't fail at runtime on some machines.
+    *collect_submodules('openai'),
+]
+
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=[],
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

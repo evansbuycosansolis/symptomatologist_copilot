@@ -83,6 +83,66 @@ export interface PatientRecordListItem {
   path: string;
 }
 
+export interface GeneratedPdfDocument {
+  id: string;
+  document_type: string;
+  title: string;
+  patient_name: string;
+  filename: string;
+  path: string;
+  stored_path: string;
+  created_at: string;
+  size_bytes: number;
+}
+
+export type AppointmentStatus =
+  | "scheduled"
+  | "checked_in"
+  | "completed"
+  | "cancelled"
+  | "no_show";
+
+export interface Appointment {
+  id: string;
+  patient_name: string;
+  patient_email?: string;
+  patient_phone?: string;
+  reason?: string;
+  start_time: string;
+  end_time: string;
+  status: AppointmentStatus;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+  reminder_sent_at?: string;
+}
+
+export interface AvailabilityWindow {
+  weekday: number; // 0=Mon..6=Sun
+  start: string; // HH:MM
+  end: string; // HH:MM
+}
+
+export interface AvailabilityConfig {
+  windows: AvailabilityWindow[];
+  slot_minutes: number;
+}
+
+export type WaitlistStatus = "waiting" | "contacted" | "converted" | "cancelled";
+
+export interface WaitlistItem {
+  id: string;
+  patient_name: string;
+  patient_email?: string;
+  patient_phone?: string;
+  reason?: string;
+  preferred_start_time?: string;
+  duration_minutes: number;
+  notes?: string;
+  created_at: string;
+  status: WaitlistStatus;
+}
+
 export const emptyIntake: PatientIntakeData = {
   FullName: "",
   DateOfBirth: "",

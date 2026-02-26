@@ -2,7 +2,15 @@
 
 import { Panel, SmallMeta } from "@/components/ui";
 import { getJson, postJson, postMultipart } from "@/lib/api";
-import { emptyIntake, type IntakeListItem, type PatientIntakeData } from "@/lib/types";
+import type {
+  Appointment,
+} from "@/lib/types";
+import {
+  emptyIntake,
+  type GeneratedPdfDocument,
+  type IntakeListItem,
+  type PatientIntakeData,
+} from "@/lib/types";
 import Link from "next/link";
 import { startTransition, useState, useTransition } from "react";
 
@@ -89,6 +97,12 @@ export default function AssistantPage() {
   const [isBusy, startBusy] = useTransition();
   const [labUploadBusy, setLabUploadBusy] = useState<number | null>(null);
   const [listBusy, setListBusy] = useState(false);
+  const [apptDate, setApptDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [apptTime, setApptTime] = useState("09:00");
+  const [apptDuration, setApptDuration] = useState(30);
+  const [apptReason, setApptReason] = useState("");
+  const [apptNotes, setApptNotes] = useState("");
+  const [allowWaitlist, setAllowWaitlist] = useState(true);
 
   const setField = (key: IntakeKey, value: string) =>
     setIntake((prev) => ({ ...prev, [key]: value }));
@@ -107,19 +121,40 @@ export default function AssistantPage() {
     }
   };
 
-  const loadIntake = async (id: string) => {
+  const openIntakePdfFromRecord = async (id: string) => {
     setError("");
-    setStatus(`Loading record ${id}...`);
+    setStatus(`Preparing patient PDF for record ${id}...`);
     try {
       const data = await getJson<{
+        meta?: IntakeListItem;
         intake: PatientIntakeData;
         enhanced_report?: string;
       }>(`/intakes/${id}`);
-      setIntake({ ...emptyIntake, ...(data.intake ?? {}) });
-      setEnhancedReport(data.enhanced_report ?? "");
-      setStatus(`Loaded intake ${id}.`);
+      const loadedIntake = { ...emptyIntake, ...(data.intake ?? {}) };
+      const loadedEnhanced = data.enhanced_report ?? "";
+      setIntake(loadedIntake);
+      setEnhancedReport(loadedEnhanced);
+
+      const patientName =
+        loadedIntake.FullName.trim() || data.meta?.full_name || "Patient";
+      try {
+        const resp = await postJson<{ ok: boolean; document: GeneratedPdfDocument }>(
+          "/documents/intake_pdf",
+          {
+            intake: loadedIntake,
+            enhanced_report: loadedEnhanced,
+            title: `Patient Record - ${patientName}`,
+          },
+        );
+        openStoredPdf(resp.document.stored_path);
+        setStatus(`Opened patient PDF: ${resp.document.filename}`);
+      } catch (e) {
+        setStatus("Patient PDF is unavailable in this build. Intake loaded into form.");
+        setError("");
+        console.warn("intake_pdf generation failed", e);
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load intake.");
+      setError(e instanceof Error ? e.message : "Failed to open patient PDF.");
     }
   };
 
@@ -158,13 +193,16 @@ export default function AssistantPage() {
     });
   };
 
-  const uploadLabImage = async (slot: number, file: File) => {
+  const uploadLabFile = async (slot: number, file: File) => {
     setLabUploadBusy(slot);
     setError("");
-    setStatus(`Uploading lab image ${slot}...`);
+    setStatus(`Uploading lab file ${slot}...`);
     try {
       const form = new FormData();
       form.append("file", file);
+      form.append("patient_name", intake.FullName.trim());
+      form.append("patient_dob", intake.DateOfBirth.trim());
+      form.append("lab_slot", String(slot));
       const resp = await postMultipart<{
         extracted_text: string;
         message?: string;
@@ -175,8 +213,8 @@ export default function AssistantPage() {
       }
       setStatus(
         resp.extracted_text
-          ? `Lab image ${slot} uploaded and text extracted.`
-          : `Lab image ${slot} uploaded.`,
+          ? `Lab file ${slot} uploaded and text extracted.`
+          : `Lab file ${slot} uploaded.`,
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Lab upload failed.");
@@ -185,20 +223,133 @@ export default function AssistantPage() {
     }
   };
 
+  const openStoredPdf = (storedPath: string) => {
+    if (typeof window === "undefined") return;
+    window.open(storedPath, "_blank", "noopener,noreferrer");
+  };
+
+  const generatePatientRecordPdf = () => {
+    const patientName = intake.FullName.trim();
+    if (!patientName) {
+      setError("Patient full name is required to generate a patient record PDF.");
+      return;
+    }
+    setError("");
+    setStatus("Generating patient record PDF...");
+    startBusy(async () => {
+      try {
+        const resp = await postJson<{ ok: boolean; document: GeneratedPdfDocument }>(
+          "/documents/intake_pdf",
+          {
+            intake,
+            enhanced_report: enhancedReport,
+            title: `Patient Record - ${patientName}`,
+          },
+        );
+        setStatus(`Patient record PDF ready: ${resp.document.filename}`);
+        openStoredPdf(resp.document.stored_path);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to generate patient record PDF.");
+      }
+    });
+  };
+
+  const generateMedicalCertificatePdf = () => {
+    const patientName = intake.FullName.trim();
+    if (!patientName) {
+      setError("Patient full name is required to generate a medical certificate.");
+      return;
+    }
+    const diagnosis = window.prompt("Diagnosis / impression", intake.ChiefComplaint || "") ?? "";
+    const recommendations =
+      window.prompt("Recommendations", "Patient is advised to follow medical advice and rest.") ?? "";
+    const restDaysRaw = window.prompt("Rest days (optional integer)", "1");
+    const doctorName = window.prompt("Doctor name", "") ?? "";
+    const clinicName = window.prompt("Clinic / facility name", "") ?? "";
+    const restDays = restDaysRaw && /^\d+$/.test(restDaysRaw.trim()) ? Number(restDaysRaw.trim()) : null;
+
+    setError("");
+    setStatus("Generating medical certificate PDF...");
+    startBusy(async () => {
+      try {
+        const resp = await postJson<{ ok: boolean; document: GeneratedPdfDocument }>(
+          "/documents/medical_certificate_pdf",
+          {
+            patient_name: patientName,
+            patient_dob: intake.DateOfBirth.trim(),
+            diagnosis,
+            recommendations,
+            rest_days: restDays,
+            doctor_name: doctorName,
+            clinic_name: clinicName,
+            additional_notes: intake.MedicalAssistantNotes || "",
+          },
+        );
+        setStatus(`Medical certificate PDF ready: ${resp.document.filename}`);
+        openStoredPdf(resp.document.stored_path);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to generate medical certificate PDF.");
+      }
+    });
+  };
+
+  const createAppointment = () => {
+    const patient_name = intake.FullName.trim();
+    if (!patient_name) {
+      setError("Full name is required before setting an appointment.");
+      return;
+    }
+    const reason = (apptReason || intake.ChiefComplaint || "").trim();
+    const notes = (apptNotes || intake.MedicalAssistantNotes || "").trim();
+    const startLocal = new Date(`${apptDate}T${apptTime}`);
+    const start_time = startLocal.toISOString();
+
+    setError("");
+    setStatus("Creating appointment...");
+    startBusy(async () => {
+      try {
+        const resp = await postJson<{
+          ok: boolean;
+          appointment?: Appointment;
+          waitlisted?: boolean;
+        }>("/appointments", {
+          patient_name,
+          patient_email: intake.Email.trim(),
+          patient_phone: intake.PhoneNumber.trim(),
+          reason,
+          notes,
+          start_time,
+          duration_minutes: apptDuration,
+          allow_waitlist: allowWaitlist,
+        });
+        if (resp.waitlisted) {
+          setStatus("Appointment slot unavailable. Patient added to waitlist.");
+        } else {
+          setStatus(
+            `Appointment set${resp.appointment?.id ? ` (${resp.appointment.id})` : ""}.`,
+          );
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to create appointment.");
+      }
+    });
+  };
+
   return (
     <main className="shell stack" data-testid="assistant-page">
       <section className="hero">
-        <h1>Medical Assistant Portal</h1>
+        <h1 className="assistant-hero-title">Medical Assistant Portal</h1>
         <p>
-          Structured patient intake capture mapped to the original WinForms
-          fields, plus lab-image upload (optional text extraction), AI-enhanced
-          intake summary generation, and saved record retrieval.
+          Front-desk and intake workspace for medical assistants: register
+          patient demographics, encode vitals and complaints, upload lab/image
+          files for text extraction, generate intake summaries, and forward
+          complete records to the doctor for clinical review.
         </p>
         <nav className="hero-nav">
           <Link href="/">Home</Link>
           <Link href="/doctor">Doctor Workspace</Link>
           <button
-            className="btn ghost"
+            className="nav-chip-btn"
             data-testid="assistant-refresh-records"
             onClick={() => void loadRecent()}
           >
@@ -341,22 +492,22 @@ export default function AssistantPage() {
       </div>
 
       <div className="page-grid columns-2">
-        <Panel title="Lab Results (1-6)" subtitle="Upload image or paste extracted text manually">
+        <Panel title="Lab Results (1-6)" subtitle="Upload image/PDF or paste extracted text manually">
           <div className="stack">
             {labKeys.map((key, idx) => (
               <div className="panel" key={key} style={{ padding: "0.75rem" }}>
                 <div className="toolbar" style={{ justifyContent: "space-between" }}>
                   <strong>Lab Result {idx + 1}</strong>
                   <label className="btn ghost" style={{ cursor: "pointer" }}>
-                    {labUploadBusy === idx + 1 ? "Uploading..." : "Upload image"}
+                    {labUploadBusy === idx + 1 ? "Uploading..." : "Upload file"}
                     <input
                       type="file"
                       data-testid={`assistant-lab-upload-${idx + 1}`}
-                      accept="image/*"
+                      accept="image/*,.pdf,application/pdf"
                       hidden
                       onChange={(e) => {
                         const file = e.target.files?.[0];
-                        if (file) void uploadLabImage(idx + 1, file);
+                        if (file) void uploadLabFile(idx + 1, file);
                         e.currentTarget.value = "";
                       }}
                     />
@@ -393,6 +544,22 @@ export default function AssistantPage() {
             </button>
             <button
               className="btn"
+              data-testid="assistant-generate-patient-pdf"
+              disabled={isBusy}
+              onClick={generatePatientRecordPdf}
+            >
+              Generate Patient Record PDF
+            </button>
+            <button
+              className="btn"
+              data-testid="assistant-generate-certificate-pdf"
+              disabled={isBusy}
+              onClick={generateMedicalCertificatePdf}
+            >
+              Generate Medical Certificate PDF
+            </button>
+            <button
+              className="btn"
               data-testid="assistant-clear-form"
               onClick={() => {
                 startTransition(() => {
@@ -418,6 +585,107 @@ export default function AssistantPage() {
         </Panel>
       </div>
 
+      <Panel title="Appointment Scheduling" subtitle="Assistant can set patient appointments on host">
+        <div className="field-grid">
+          <div className="field">
+            <label>Patient name (from intake)</label>
+            <input
+              data-testid="assistant-appt-patient-name"
+              value={intake.FullName}
+              onChange={(e) => setField("FullName", e.target.value)}
+              placeholder="Patient full name"
+            />
+          </div>
+          <div className="field">
+            <label>Patient email</label>
+            <input
+              data-testid="assistant-appt-email"
+              value={intake.Email}
+              onChange={(e) => setField("Email", e.target.value)}
+              placeholder="patient@example.com"
+            />
+          </div>
+          <div className="field">
+            <label>Patient phone</label>
+            <input
+              data-testid="assistant-appt-phone"
+              value={intake.PhoneNumber}
+              onChange={(e) => setField("PhoneNumber", e.target.value)}
+              placeholder="Phone number"
+            />
+          </div>
+          <div className="field">
+            <label>Date</label>
+            <input
+              type="date"
+              data-testid="assistant-appt-date"
+              value={apptDate}
+              onChange={(e) => setApptDate(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label>Time</label>
+            <input
+              type="time"
+              data-testid="assistant-appt-time"
+              value={apptTime}
+              onChange={(e) => setApptTime(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label>Duration (minutes)</label>
+            <select
+              data-testid="assistant-appt-duration"
+              value={apptDuration}
+              onChange={(e) => setApptDuration(Number(e.target.value))}
+            >
+              {[15, 30, 45, 60].map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label>Reason</label>
+            <input
+              data-testid="assistant-appt-reason"
+              value={apptReason}
+              onChange={(e) => setApptReason(e.target.value)}
+              placeholder={intake.ChiefComplaint || "Chief complaint / reason"}
+            />
+          </div>
+        </div>
+        <div className="field">
+          <label>Scheduling notes</label>
+          <textarea
+            data-testid="assistant-appt-notes"
+            value={apptNotes}
+            onChange={(e) => setApptNotes(e.target.value)}
+            placeholder={intake.MedicalAssistantNotes || "Optional notes"}
+          />
+        </div>
+        <div className="toolbar">
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="checkbox"
+              data-testid="assistant-appt-allow-waitlist"
+              checked={allowWaitlist}
+              onChange={(e) => setAllowWaitlist(e.target.checked)}
+            />
+            Add to waitlist if slot is full
+          </label>
+          <button
+            className="btn primary"
+            data-testid="assistant-set-appointment"
+            disabled={isBusy}
+            onClick={createAppointment}
+          >
+            Set Appointment
+          </button>
+        </div>
+      </Panel>
+
       <Panel title="Recent Intake Records" subtitle="Load previously saved intake JSON + enhanced report">
         <div className="list" data-testid="assistant-recent-list">
           {recent.length === 0 ? (
@@ -435,9 +703,9 @@ export default function AssistantPage() {
                 <button
                   className="btn"
                   data-testid={`assistant-load-intake-${item.id}`}
-                  onClick={() => void loadIntake(item.id)}
+                  onClick={() => void openIntakePdfFromRecord(item.id)}
                 >
-                  Load into form
+                  Open patient PDF
                 </button>
               </div>
             ))

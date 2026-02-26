@@ -1,8 +1,21 @@
 import type { ChatMessage, PatientIntakeData } from "@/lib/types";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") ||
-  "http://127.0.0.1:8080";
+function computeApiBase(): string {
+  const envBase = (process.env.NEXT_PUBLIC_API_BASE_URL || "").trim();
+  if (envBase) return envBase.replace(/\/+$/, "");
+
+  if (typeof window !== "undefined" && window.location?.origin) {
+    const origin = window.location.origin;
+    const isLikelyNextDev =
+      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") &&
+      window.location.port === "3000";
+    return isLikelyNextDev ? "http://127.0.0.1:8080" : origin;
+  }
+
+  return "http://127.0.0.1:8080";
+}
+
+const API_BASE = computeApiBase();
 
 async function parseResponse<T>(resp: Response): Promise<T> {
   if (!resp.ok) {
@@ -26,6 +39,15 @@ export async function getJson<T>(path: string): Promise<T> {
 export async function postJson<T>(path: string, body: unknown): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return parseResponse<T>(resp);
+}
+
+export async function patchJson<T>(path: string, body: unknown): Promise<T> {
+  const resp = await fetch(`${API_BASE}${path}`, {
+    method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });

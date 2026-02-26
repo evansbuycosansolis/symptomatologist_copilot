@@ -1,11 +1,17 @@
 "use client";
 
 import { Panel, SmallMeta } from "@/components/ui";
-import { getJson, postJson, postMultipart } from "@/lib/api";
+import { getJson, patchJson, postJson, postMultipart } from "@/lib/api";
 import type {
+  Appointment,
+  AvailabilityConfig,
   ChatMessage,
+  GeneratedPdfDocument,
+  IntakeListItem,
   KbDocument,
+  PatientIntakeData,
   PatientRecordListItem,
+  WaitlistItem,
 } from "@/lib/types";
 import Link from "next/link";
 import { useState, useTransition } from "react";
@@ -30,6 +36,7 @@ export default function DoctorPage() {
   const [chatInput, setChatInput] = useState("");
 
   const [records, setRecords] = useState<PatientRecordListItem[]>([]);
+  const [assistantIntakes, setAssistantIntakes] = useState<IntakeListItem[]>([]);
   const [rxQuery, setRxQuery] = useState("");
   const [rxResults, setRxResults] = useState<string[]>([]);
 
@@ -44,23 +51,322 @@ export default function DoctorPage() {
   const [trainTags, setTrainTags] = useState("");
   const [trainBusy, setTrainBusy] = useState(false);
 
+  const [availability, setAvailability] = useState<AvailabilityConfig | null>(null);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [waitlist, setWaitlist] = useState<WaitlistItem[]>([]);
+  const [schedBusy, setSchedBusy] = useState(false);
+
+  const [apptPatientName, setApptPatientName] = useState("");
+  const [apptPatientEmail, setApptPatientEmail] = useState("");
+  const [apptPatientPhone, setApptPatientPhone] = useState("");
+  const [apptReason, setApptReason] = useState("");
+  const [apptNotes, setApptNotes] = useState("");
+  const [apptDate, setApptDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [apptTime, setApptTime] = useState("09:00");
+  const [apptDuration, setApptDuration] = useState(30);
+  const [allowWaitlist, setAllowWaitlist] = useState(true);
+  const [showAssistantIntakePicker, setShowAssistantIntakePicker] = useState(false);
+  const [selectedAssistantIntakeId, setSelectedAssistantIntakeId] = useState("");
+
   const setUiError = (e: unknown, fallback: string) => {
     setError(e instanceof Error ? e.message : fallback);
+  };
+
+  const formatLocal = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleString();
+    } catch {
+      return iso;
+    }
+  };
+
+  const extractDobFromText = (text: string) => {
+    const m = (text || "").match(/(?:Date of Birth|DOB)\s*:\s*([^\n\r]+)/i);
+    return (m?.[1] || "").trim();
+  };
+
+  const refreshScheduling = async () => {
+    setSchedBusy(true);
+    setError("");
+    setStatus("Loading scheduling data...");
+    try {
+      const [a, ap, wl] = await Promise.all([
+        getJson<AvailabilityConfig>("/availability"),
+        getJson<{ items: Appointment[] }>("/appointments"),
+        getJson<{ items: WaitlistItem[] }>("/waitlist"),
+      ]);
+      setAvailability(a);
+      setAppointments(ap.items ?? []);
+      setWaitlist(wl.items ?? []);
+      setStatus("Scheduling data loaded.");
+    } catch (e) {
+      setUiError(e, "Failed to load scheduling data.");
+    } finally {
+      setSchedBusy(false);
+    }
+  };
+
+  const saveAvailability = async () => {
+    if (!availability) return;
+    setSchedBusy(true);
+    setError("");
+    setStatus("Saving availability...");
+    try {
+      const resp = await postJson<{ ok: boolean; availability: AvailabilityConfig }>(
+        "/availability",
+        availability,
+      );
+      setAvailability(resp.availability);
+      setStatus("Availability saved.");
+    } catch (e) {
+      setUiError(e, "Failed to save availability.");
+    } finally {
+      setSchedBusy(false);
+    }
+  };
+
+  const createAppointment = async () => {
+    const patient_name = apptPatientName.trim();
+    if (!patient_name) {
+      setError("Patient name is required.");
+      return;
+    }
+    const startLocal = new Date(`${apptDate}T${apptTime}`);
+    const start_time = startLocal.toISOString();
+
+    setSchedBusy(true);
+    setError("");
+    setStatus("Creating appointment...");
+    try {
+      const resp = await postJson<{
+        ok: boolean;
+        appointment?: Appointment;
+        waitlisted?: boolean;
+      }>("/appointments", {
+        patient_name,
+        patient_email: apptPatientEmail.trim(),
+        patient_phone: apptPatientPhone.trim(),
+        reason: apptReason.trim(),
+        notes: apptNotes.trim(),
+        start_time,
+        duration_minutes: apptDuration,
+        allow_waitlist: allowWaitlist,
+      });
+
+      if (resp.waitlisted) {
+        setStatus("Time slot was full; patient added to waitlist.");
+      } else {
+        setStatus(`Appointment created${resp.appointment?.id ? ` (${resp.appointment.id})` : ""}.`);
+      }
+      await refreshScheduling();
+    } catch (e) {
+      setUiError(e, "Failed to create appointment.");
+    } finally {
+      setSchedBusy(false);
+    }
+  };
+
+  const updateAppointmentStatus = async (id: string, status: Appointment["status"]) => {
+    setSchedBusy(true);
+    setError("");
+    setStatus(`Updating appointment ${id}...`);
+    try {
+      await patchJson(`/appointments/${id}`, { status });
+      setStatus(`Appointment updated: ${id}.`);
+      await refreshScheduling();
+    } catch (e) {
+      setUiError(e, "Failed to update appointment.");
+    } finally {
+      setSchedBusy(false);
+    }
+  };
+
+  const sendReminder = async (id: string) => {
+    setSchedBusy(true);
+    setError("");
+    setStatus(`Sending reminder for ${id}...`);
+    try {
+      await postJson(`/appointments/${id}/send_reminder`, {});
+      setStatus("Reminder sent.");
+      await refreshScheduling();
+    } catch (e) {
+      setUiError(e, "Failed to send reminder.");
+    } finally {
+      setSchedBusy(false);
+    }
+  };
+
+  const convertWaitlistItem = async (w: WaitlistItem) => {
+    if (!w?.id) return;
+    if ((w.status ?? "waiting") !== "waiting") {
+      setError("Only waiting items can be converted.");
+      return;
+    }
+    const start_time = (w.preferred_start_time ?? "").trim();
+    if (!start_time) {
+      setError("This waitlist item has no preferred start time.");
+      return;
+    }
+
+    setSchedBusy(true);
+    setError("");
+    setStatus(`Converting waitlist item ${w.id}...`);
+    try {
+      await postJson(`/waitlist/${w.id}/convert`, { start_time });
+      setStatus(`Waitlist item converted: ${w.id}.`);
+      await refreshScheduling();
+    } catch (e) {
+      setUiError(e, "Failed to convert waitlist item.");
+    } finally {
+      setSchedBusy(false);
+    }
   };
 
   const appendToNote = (text: string) => {
     setDoctorNote((prev) => `${prev}${prev.trim() ? "\n\n" : ""}${text}`.trim());
   };
 
+  const openStoredPdf = (storedPath: string) => {
+    if (typeof window === "undefined") return;
+    window.open(storedPath, "_blank", "noopener,noreferrer");
+  };
+
+  const analyzeCaseNote = async (note: string) => {
+    const refNames = kbDocs
+      .filter((d) => (d.tags ?? []).every((t) => t !== "patient-record"))
+      .slice(0, 5)
+      .map((d) => d.filename);
+    const resp = await postJson<{ analysis: string }>("/analyze_case", {
+      note,
+      reference_names: refNames,
+    });
+    return resp.analysis ?? "";
+  };
+
+  const buildAssistantIntakeNote = (resp: {
+    meta?: IntakeListItem;
+    intake?: PatientIntakeData;
+    intake_summary?: string;
+    enhanced_report?: string;
+  }) => {
+    const intake = resp.intake;
+    const name = resp.meta?.full_name || intake?.FullName || "Unknown patient";
+    const parts: string[] = [`[Assistant intake selected] ${name}`];
+
+    if (intake?.DateOfBirth) parts.push(`DOB: ${intake.DateOfBirth}`);
+    if (intake?.ChiefComplaint) parts.push(`Chief complaint: ${intake.ChiefComplaint}`);
+    if ((resp.intake_summary || "").trim()) {
+      parts.push(`Intake summary:\n${(resp.intake_summary || "").trim()}`);
+    }
+    if ((resp.enhanced_report || "").trim()) {
+      parts.push(`Enhanced report:\n${(resp.enhanced_report || "").trim()}`);
+    }
+
+    return { name, noteText: parts.join("\n\n") };
+  };
+
   const refreshPatientRecords = async () => {
     setError("");
-    setStatus("Loading patient records...");
+    setStatus("Loading doctor records and assistant intakes...");
     try {
-      const resp = await getJson<{ items: PatientRecordListItem[] }>("/patient_records");
-      setRecords(resp.items ?? []);
-      setStatus(`Loaded ${resp.items?.length ?? 0} patient record(s).`);
+      const [recordsResp, intakesResp] = await Promise.all([
+        getJson<{ items: PatientRecordListItem[] }>("/patient_records"),
+        getJson<{ items: IntakeListItem[] }>("/intakes"),
+      ]);
+      const doctorRecords = recordsResp.items ?? [];
+      const intakeItems = intakesResp.items ?? [];
+      setRecords(doctorRecords);
+      setAssistantIntakes(intakeItems);
+      if (!selectedAssistantIntakeId && intakeItems[0]?.id) {
+        setSelectedAssistantIntakeId(intakeItems[0].id);
+      } else if (
+        selectedAssistantIntakeId &&
+        !intakeItems.some((item) => item.id === selectedAssistantIntakeId)
+      ) {
+        setSelectedAssistantIntakeId(intakeItems[0]?.id ?? "");
+      }
+      setStatus(
+        `Loaded ${doctorRecords.length} doctor record(s) and ${intakeItems.length} assistant intake(s).`,
+      );
     } catch (e) {
       setUiError(e, "Failed to load patient records.");
+    }
+  };
+
+  const appendAssistantIntakeToNote = async (recordId: string) => {
+    setError("");
+    setStatus(`Loading assistant intake ${recordId}...`);
+    try {
+      const resp = await getJson<{
+        meta?: IntakeListItem;
+        intake?: PatientIntakeData;
+        intake_summary?: string;
+        enhanced_report?: string;
+      }>(`/intakes/${recordId}`);
+
+      appendToNote(buildAssistantIntakeNote(resp).noteText);
+      setStatus(`Assistant intake ${recordId} appended to doctor note.`);
+    } catch (e) {
+      setUiError(e, "Failed to load assistant intake.");
+    }
+  };
+
+  const openAssistantIntakeAndAnalyze = (recordId: string) => {
+    setError("");
+    setStatus(`Opening assistant intake ${recordId}...`);
+    startBusy(async () => {
+      try {
+        const resp = await getJson<{
+          meta?: IntakeListItem;
+          intake?: PatientIntakeData;
+          intake_summary?: string;
+          enhanced_report?: string;
+        }>(`/intakes/${recordId}`);
+
+        const { name, noteText } = buildAssistantIntakeNote(resp);
+        setDoctorNote(noteText);
+        setApptPatientName((prev) => prev || name);
+
+        let pdfOpened = false;
+        if (resp.intake) {
+          try {
+            const pdfResp = await postJson<{ ok: boolean; document: GeneratedPdfDocument }>(
+              "/documents/intake_pdf",
+              {
+                intake: resp.intake,
+                enhanced_report: resp.enhanced_report ?? "",
+                title: `Assistant Intake Record - ${name}`,
+              },
+            );
+            if (pdfResp.document?.stored_path) {
+              openStoredPdf(pdfResp.document.stored_path);
+              pdfOpened = true;
+            }
+          } catch {
+            pdfOpened = false;
+          }
+        }
+
+        const aiAnalysis = await analyzeCaseNote(noteText);
+        setAnalysis(aiAnalysis);
+        setStatus(
+          pdfOpened
+            ? `Loaded ${name}, opened patient PDF, and completed AI analysis.`
+            : `Loaded ${name} and completed AI analysis.`,
+        );
+      } catch (e) {
+        setUiError(e, "Failed to open assistant intake for analysis.");
+      }
+    });
+  };
+
+  const toggleAssistantIntakePicker = async () => {
+    const next = !showAssistantIntakePicker;
+    setShowAssistantIntakePicker(next);
+    if (!next) return;
+
+    if (!assistantIntakes.length) {
+      await refreshPatientRecords();
     }
   };
 
@@ -110,15 +416,8 @@ export default function DoctorPage() {
     setStatus("Analyzing case...");
     startBusy(async () => {
       try {
-        const refNames = kbDocs
-          .filter((d) => (d.tags ?? []).every((t) => t !== "patient-record"))
-          .slice(0, 5)
-          .map((d) => d.filename);
-        const resp = await postJson<{ analysis: string }>("/analyze_case", {
-          note: doctorNote,
-          reference_names: refNames,
-        });
-        setAnalysis(resp.analysis ?? "");
+        const aiAnalysis = await analyzeCaseNote(doctorNote);
+        setAnalysis(aiAnalysis);
         setStatus("Case analysis complete.");
       } catch (e) {
         setUiError(e, "Analyze failed.");
@@ -158,6 +457,79 @@ export default function DoctorPage() {
         await refreshKb();
       } catch (e) {
         setUiError(e, "Save patient record failed.");
+      }
+    });
+  };
+
+  const generatePatientRecordPdf = () => {
+    const clean = doctorNote.trim();
+    if (!clean) {
+      setError("Doctor note is empty.");
+      return;
+    }
+    setError("");
+    setStatus("Generating patient record PDF...");
+    startBusy(async () => {
+      try {
+        const patientDob = extractDobFromText(clean);
+        const resp = await postJson<{ ok: boolean; document: GeneratedPdfDocument }>(
+          "/documents/patient_record_pdf",
+          {
+            note: clean,
+            title: "Doctor Patient Record",
+            patient_name: apptPatientName.trim(),
+            patient_dob: patientDob,
+            source_role: "doctor",
+          },
+        );
+        setStatus(`Patient record PDF ready: ${resp.document.filename}`);
+        openStoredPdf(resp.document.stored_path);
+      } catch (e) {
+        setUiError(e, "Failed to generate patient record PDF.");
+      }
+    });
+  };
+
+  const generateMedicalCertificatePdf = () => {
+    const defaultPatient = apptPatientName.trim();
+    const patientName = (window.prompt("Patient name", defaultPatient) || "").trim();
+    if (!patientName) {
+      setError("Patient name is required to generate a medical certificate.");
+      return;
+    }
+    const diagnosis = window.prompt("Diagnosis / impression", apptReason || "") ?? "";
+    const recommendations =
+      window.prompt("Recommendations", "Patient is advised to follow up and rest as needed.") ?? "";
+    const dobDefault = extractDobFromText(doctorNote);
+    const patientDob = (window.prompt("Date of birth (optional)", dobDefault) || "").trim();
+    const restDaysRaw = window.prompt("Rest days (optional integer)", "1");
+    const doctorName = window.prompt("Doctor name", "") ?? "";
+    const doctorLicense = window.prompt("Doctor license (optional)", "") ?? "";
+    const clinicName = window.prompt("Clinic / facility name", "") ?? "";
+    const restDays = restDaysRaw && /^\d+$/.test(restDaysRaw.trim()) ? Number(restDaysRaw.trim()) : null;
+
+    setError("");
+    setStatus("Generating medical certificate PDF...");
+    startBusy(async () => {
+      try {
+        const resp = await postJson<{ ok: boolean; document: GeneratedPdfDocument }>(
+          "/documents/medical_certificate_pdf",
+          {
+            patient_name: patientName,
+            patient_dob: patientDob,
+            diagnosis,
+            recommendations,
+            rest_days: restDays,
+            doctor_name: doctorName,
+            doctor_license: doctorLicense,
+            clinic_name: clinicName,
+            additional_notes: doctorNote.slice(0, 1200),
+          },
+        );
+        setStatus(`Medical certificate PDF ready: ${resp.document.filename}`);
+        openStoredPdf(resp.document.stored_path);
+      } catch (e) {
+        setUiError(e, "Failed to generate medical certificate PDF.");
       }
     });
   };
@@ -274,31 +646,245 @@ export default function DoctorPage() {
   return (
     <main className="shell stack" data-testid="doctor-page">
       <section className="hero">
-        <h1>Medical Doctor Workspace</h1>
+        <h1 className="doctor-hero-title">Medical Doctor Workspace</h1>
         <p>
-          Web replacement for the desktop doctor portal: attachments, note
-          revision, AI chat, case analysis, local reference KB, medical
-          references search, medication lookup, and patient record persistence.
+          Clinical command center for physicians: review assistant intakes,
+          perform AI-supported case analysis, manage scheduling, generate
+          patient documents, and maintain complete patient records for final
+          doctor-reviewed decisions.
         </p>
         <nav className="hero-nav">
           <Link href="/">Home</Link>
           <Link href="/assistant">Assistant Portal</Link>
           <button
-            className="btn ghost"
+            className="nav-chip-btn"
             data-testid="doctor-refresh-kb"
             onClick={() => void refreshKb()}
           >
             Refresh KB
           </button>
           <button
-            className="btn ghost"
+            className="nav-chip-btn"
             data-testid="doctor-refresh-patient-records"
             onClick={() => void refreshPatientRecords()}
           >
-            Refresh patient records
+            Refresh patient/intake records
           </button>
         </nav>
       </section>
+
+      <Panel title="Scheduling" subtitle="Appointments, availability, waitlist, reminders">
+        <div className="stack" style={{ gap: 12 }}>
+          <div className="hero-nav" style={{ alignItems: "center" }}>
+            <button className="btn ghost" onClick={() => void refreshScheduling()} disabled={schedBusy}>
+              {schedBusy ? "Loading..." : "Refresh scheduling"}
+            </button>
+            <SmallMeta>
+              API: <code>/appointments</code>, <code>/availability</code>, <code>/waitlist</code>
+            </SmallMeta>
+          </div>
+
+          <div className="page-grid columns-2">
+            <div className="stack" style={{ gap: 12 }}>
+              <div className="field-grid">
+                <div className="field">
+                  <label>Patient name</label>
+                  <input value={apptPatientName} onChange={(e) => setApptPatientName(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Patient email (for reminders)</label>
+                  <input value={apptPatientEmail} onChange={(e) => setApptPatientEmail(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Patient phone</label>
+                  <input value={apptPatientPhone} onChange={(e) => setApptPatientPhone(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Reason</label>
+                  <input value={apptReason} onChange={(e) => setApptReason(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Date</label>
+                  <input type="date" value={apptDate} onChange={(e) => setApptDate(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Time</label>
+                  <input type="time" value={apptTime} onChange={(e) => setApptTime(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Duration (minutes)</label>
+                  <select value={apptDuration} onChange={(e) => setApptDuration(Number(e.target.value))}>
+                    {[15, 30, 45, 60].map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="checkbox"
+                      checked={allowWaitlist}
+                      onChange={(e) => setAllowWaitlist(e.target.checked)}
+                    />
+                    Add to waitlist if slot is full
+                  </label>
+                </div>
+              </div>
+              <div className="field">
+                <label>Notes</label>
+                <textarea value={apptNotes} onChange={(e) => setApptNotes(e.target.value)} />
+              </div>
+
+              <div className="hero-nav">
+                <button className="btn" onClick={() => void createAppointment()} disabled={schedBusy}>
+                  Create appointment
+                </button>
+              </div>
+            </div>
+
+            <div className="stack" style={{ gap: 12 }}>
+              <div className="field">
+                <label>Availability (weekly)</label>
+                {!availability ? (
+                  <SmallMeta>Click “Refresh scheduling” to load availability.</SmallMeta>
+                ) : (
+                  <div className="stack" style={{ gap: 10 }}>
+                    <div className="field" style={{ maxWidth: 220 }}>
+                      <label>Slot minutes</label>
+                      <input
+                        type="number"
+                        value={availability.slot_minutes}
+                        onChange={(e) =>
+                          setAvailability({
+                            ...availability,
+                            slot_minutes: Number(e.target.value || 15),
+                          })
+                        }
+                      />
+                    </div>
+                    {availability.windows.map((w, idx) => (
+                      <div key={`${w.weekday}-${idx}`} className="field-grid compact-3">
+                        <div className="field">
+                          <label>Weekday (0=Mon..6=Sun)</label>
+                          <input
+                            type="number"
+                            value={w.weekday}
+                            onChange={(e) => {
+                              const next = availability.windows.slice();
+                              next[idx] = { ...w, weekday: Number(e.target.value) };
+                              setAvailability({ ...availability, windows: next });
+                            }}
+                          />
+                        </div>
+                        <div className="field">
+                          <label>Start</label>
+                          <input
+                            type="time"
+                            value={w.start}
+                            onChange={(e) => {
+                              const next = availability.windows.slice();
+                              next[idx] = { ...w, start: e.target.value };
+                              setAvailability({ ...availability, windows: next });
+                            }}
+                          />
+                        </div>
+                        <div className="field">
+                          <label>End</label>
+                          <input
+                            type="time"
+                            value={w.end}
+                            onChange={(e) => {
+                              const next = availability.windows.slice();
+                              next[idx] = { ...w, end: e.target.value };
+                              setAvailability({ ...availability, windows: next });
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                    <div className="hero-nav">
+                      <button className="btn" onClick={() => void saveAvailability()} disabled={schedBusy}>
+                        Save availability
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="page-grid columns-2">
+            <div className="stack" style={{ gap: 10 }}>
+              <h3 style={{ margin: 0 }}>Upcoming appointments</h3>
+              {!appointments.length ? (
+                <SmallMeta>No appointments loaded.</SmallMeta>
+              ) : (
+                <div className="stack" style={{ gap: 10 }}>
+                  {appointments.slice(0, 12).map((a) => (
+                    <div key={a.id} className="panel" style={{ padding: 12 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                        <div>
+                          <strong>{a.patient_name}</strong>
+                          <div className="small-meta">{formatLocal(a.start_time)}</div>
+                          <div className="small-meta">Status: {a.status}</div>
+                        </div>
+                        <div className="hero-nav" style={{ justifyContent: "flex-end" }}>
+                          <button className="btn ghost" onClick={() => void updateAppointmentStatus(a.id, "checked_in")}>
+                            Check-in
+                          </button>
+                          <button className="btn ghost" onClick={() => void updateAppointmentStatus(a.id, "completed")}>
+                            Complete
+                          </button>
+                          <button className="btn ghost" onClick={() => void updateAppointmentStatus(a.id, "cancelled")}>
+                            Cancel
+                          </button>
+                          <button className="btn ghost" onClick={() => void sendReminder(a.id)}>
+                            Send reminder
+                          </button>
+                        </div>
+                      </div>
+                      {a.reason ? <div className="small-meta">Reason: {a.reason}</div> : null}
+                      {a.patient_email ? <div className="small-meta">Email: {a.patient_email}</div> : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="stack" style={{ gap: 10 }}>
+              <h3 style={{ margin: 0 }}>Waitlist</h3>
+              {!waitlist.length ? (
+                <SmallMeta>No waitlist items.</SmallMeta>
+              ) : (
+                <div className="stack" style={{ gap: 10 }}>
+                  {waitlist.slice(0, 12).map((w) => (
+                    <div key={w.id} className="panel" style={{ padding: 12 }}>
+                      <strong>{w.patient_name}</strong>
+                      <div className="small-meta">Status: {w.status}</div>
+                      {w.preferred_start_time ? (
+                        <div className="small-meta">Preferred: {formatLocal(w.preferred_start_time)}</div>
+                      ) : null}
+                      {w.reason ? <div className="small-meta">Reason: {w.reason}</div> : null}
+
+                      <div className="hero-nav" style={{ justifyContent: "flex-start" }}>
+                        <button
+                          className="btn ghost"
+                          onClick={() => void convertWaitlistItem(w)}
+                          disabled={schedBusy || (w.status ?? "waiting") !== "waiting" || !w.preferred_start_time}
+                        >
+                          Convert to appointment
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </Panel>
 
       <div className={`status${error ? " error" : ""}`} data-testid="doctor-status">
         {error || status}
@@ -307,8 +893,15 @@ export default function DoctorPage() {
       <div className="page-grid columns-2">
         <Panel title="Doctor Note" subtitle="Main case narrative workspace">
           <div className="toolbar">
-            <label className="btn" data-testid="doctor-attach-file-label">
-              Attach file (PDF/Text/Image)
+            <button
+              className="btn"
+              data-testid="doctor-attach-file-label"
+              onClick={() => void toggleAssistantIntakePicker()}
+            >
+              Attach assistant patient record
+            </button>
+            <label className="btn ghost" data-testid="doctor-upload-local-file-label">
+              Upload local file (PDF/Text/Image)
               <input
                 hidden
                 type="file"
@@ -344,10 +937,73 @@ export default function DoctorPage() {
             >
               Save Patient Record
             </button>
+            <button
+              className="btn"
+              data-testid="doctor-generate-patient-pdf"
+              disabled={busy}
+              onClick={generatePatientRecordPdf}
+            >
+              Generate Patient Record PDF
+            </button>
+            <button
+              className="btn"
+              data-testid="doctor-generate-certificate-pdf"
+              disabled={busy}
+              onClick={generateMedicalCertificatePdf}
+            >
+              Generate Medical Certificate PDF
+            </button>
             <button className="btn" data-testid="doctor-clear-note" onClick={() => setDoctorNote("")}>
               Clear
             </button>
           </div>
+          {showAssistantIntakePicker ? (
+            <div
+              className="panel stack"
+              style={{ marginTop: 12, padding: 12, gap: 10 }}
+              data-testid="doctor-assistant-intake-picker"
+            >
+              <div className="field">
+                <label htmlFor="assistantIntakeSelect">Assistant patient intake</label>
+                <select
+                  id="assistantIntakeSelect"
+                  data-testid="doctor-assistant-intake-select"
+                  value={selectedAssistantIntakeId}
+                  onChange={(e) => setSelectedAssistantIntakeId(e.target.value)}
+                >
+                  <option value="">Select assistant patient record...</option>
+                  {assistantIntakes.map((i) => (
+                    <option key={i.id} value={i.id}>
+                      {i.full_name || "(Unnamed patient)"} | DOB: {i.date_of_birth || "-"} |{" "}
+                      {i.created_at}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="toolbar">
+                <button
+                  className="btn primary"
+                  data-testid="doctor-open-selected-intake"
+                  disabled={busy || !selectedAssistantIntakeId}
+                  onClick={() => openAssistantIntakeAndAnalyze(selectedAssistantIntakeId)}
+                >
+                  Open Selected Patient + Analyze
+                </button>
+                <button
+                  className="btn"
+                  data-testid="doctor-refresh-intake-picker"
+                  disabled={busy}
+                  onClick={() => void refreshPatientRecords()}
+                >
+                  Refresh patient records
+                </button>
+              </div>
+              <SmallMeta>
+                Selecting a patient loads the assistant intake into Doctor Note,
+                opens a patient PDF, and runs AI Analysis for doctor review.
+              </SmallMeta>
+            </div>
+          ) : null}
           <textarea
             data-testid="doctor-note"
             value={doctorNote}
@@ -357,7 +1013,10 @@ export default function DoctorPage() {
           />
         </Panel>
 
-        <Panel title="AI Analysis" subtitle="Output from /analyze_case">
+        <Panel
+          title="AI Analysis"
+          subtitle="Output from /analyze_case (clinical support only; doctor review required)"
+        >
           <div className="pre" data-testid="doctor-analysis-output" style={{ minHeight: 428 }}>
             {analysis || "Case analysis output will appear here."}
           </div>
@@ -570,30 +1229,74 @@ export default function DoctorPage() {
         </Panel>
       </div>
 
-      <Panel title="Saved Patient Records" subtitle="Created from doctor note and indexed in local KB">
-        <div className="list" data-testid="doctor-patient-records-list">
-          {records.length === 0 ? (
-            <div className="list-item">
-              <SmallMeta>No patient records loaded yet.</SmallMeta>
-            </div>
-          ) : (
-            records.map((r) => (
-              <div className="list-item" key={r.id} data-testid="doctor-patient-record-item">
-                <strong>{r.title}</strong>
-                <SmallMeta>{r.filename}</SmallMeta>
-                <SmallMeta>{r.created_at}</SmallMeta>
-                <div className="toolbar">
-                  <button
-                    className="btn"
-                    data-testid={`doctor-append-record-${r.id}`}
-                    onClick={() => appendToNote(`[Patient record selected]\n${r.title}\n${r.filename}`)}
-                  >
-                    Append Reference to Note
-                  </button>
+      <Panel
+        title="Saved Patient Records"
+        subtitle="Doctor records plus assistant intakes from host storage"
+      >
+        <div className="stack" style={{ gap: 12 }}>
+          <div>
+            <h3 style={{ margin: 0 }}>Doctor Records</h3>
+            <div className="list" data-testid="doctor-patient-records-list">
+              {records.length === 0 ? (
+                <div className="list-item">
+                  <SmallMeta>No doctor records loaded yet.</SmallMeta>
                 </div>
-              </div>
-            ))
-          )}
+              ) : (
+                records.map((r) => (
+                  <div className="list-item" key={r.id} data-testid="doctor-patient-record-item">
+                    <strong>{r.title}</strong>
+                    <SmallMeta>{r.filename}</SmallMeta>
+                    <SmallMeta>{r.created_at}</SmallMeta>
+                    <div className="toolbar">
+                      <button
+                        className="btn"
+                        data-testid={`doctor-append-record-${r.id}`}
+                        onClick={() => appendToNote(`[Patient record selected]\n${r.title}\n${r.filename}`)}
+                      >
+                        Append Reference to Note
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div>
+            <h3 style={{ margin: 0 }}>Assistant Intakes</h3>
+            <div className="list" data-testid="doctor-intake-records-list">
+              {assistantIntakes.length === 0 ? (
+                <div className="list-item">
+                  <SmallMeta>No assistant intakes loaded yet.</SmallMeta>
+                </div>
+              ) : (
+                assistantIntakes.map((i) => (
+                  <div className="list-item" key={i.id} data-testid="doctor-intake-record-item">
+                    <strong>{i.full_name || "(Unnamed patient)"}</strong>
+                    <SmallMeta>DOB: {i.date_of_birth || "-"}</SmallMeta>
+                    <SmallMeta>Chief complaint: {i.chief_complaint || "-"}</SmallMeta>
+                    <SmallMeta>{i.created_at}</SmallMeta>
+                    <div className="toolbar">
+                      <button
+                        className="btn"
+                        data-testid={`doctor-append-intake-${i.id}`}
+                        onClick={() => void appendAssistantIntakeToNote(i.id)}
+                      >
+                        Append Intake to Note
+                      </button>
+                      <button
+                        className="btn primary"
+                        data-testid={`doctor-open-analyze-intake-${i.id}`}
+                        onClick={() => openAssistantIntakeAndAnalyze(i.id)}
+                      >
+                        Open + Analyze
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       </Panel>
     </main>

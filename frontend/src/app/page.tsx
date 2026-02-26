@@ -6,7 +6,7 @@ export default function HomePage() {
       <section className="hero">
         <h1>CoPilot Symptomatologist</h1>
         <p>
-          Web migration of the original WinForms assistant and doctor portals.
+          Symptomatologist Copilot powered by Retrieval-Augmented Generation (RAG) GenAI.
           Use the Medical Assistant workspace for patient intake capture, then
           continue in the Doctor workspace for case analysis, chat, references,
           and local knowledge-base indexing.
